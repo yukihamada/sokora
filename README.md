@@ -73,8 +73,10 @@ clc
 | `clc` | 本家 Anthropic で Claude Code |
 | `ai-local` | ローカルに切替（起動しない） |
 | `ai-cloud` | クラウドに切替（起動しない） |
-| `~/ai.sh img "プロンプト"` | FLUX.1で画像生成 |
+| `~/ai.sh img "プロンプト"` | FLUX.1で画像生成 (~17秒) |
 | `~/ai.sh img "プロンプト" file.png 1024` | ファイル名・サイズ指定 |
+| `~/ai.sh vid "プロンプト"` | Wan 2.1で動画生成 (~10分) |
+| `~/ai.sh vid "プロンプト" file.mp4` | ファイル名指定 |
 
 ## アーキテクチャ
 
@@ -125,6 +127,21 @@ Anthropic Messages API と OpenAI Chat Completions API を相互変換する軽�
 - FLUX.1-schnell (4bit量子化) を使用
 - 1024x1024 が約 17秒（M5, 4ステップ）
 - 生成画像は `~/generated/` に保存
+- 生成後に自動でプレビュー表示
+
+### 動画生成 (Wan 2.1)
+
+```bash
+# テキストから動画生成
+~/ai.sh vid "A samurai on a cliff, sunset, wind blowing, cinematic"
+
+# ファイル名指定
+~/ai.sh vid "cherry blossoms falling in slow motion" sakura.mp4
+```
+
+- Wan 2.1 1.3B モデル（MPS/Apple GPU）
+- 480x832, 17フレーム, 約10分
+- 生成後にメモリ自動解放（常駐LLMに影響なし）
 
 ## カスタマイズ
 
