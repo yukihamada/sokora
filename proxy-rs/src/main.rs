@@ -334,10 +334,17 @@ fn oai_to_anthropic(data: &Value, model: &str) -> Value {
 
 // ── Auth ──
 
-fn check_auth(state: &AppState, headers: &axum::http::HeaderMap) -> Result<(), Response> {
+fn check_auth(state: &AppState, headers: &axum::http::HeaderMap, peer: Option<&std::net::SocketAddr>) -> Result<(), Response> {
+    // Localhost always allowed — no key needed
+    if let Some(addr) = peer {
+        if addr.ip().is_loopback() {
+            return Ok(());
+        }
+    }
+
     let key = match &state.api_key {
         Some(k) => k,
-        None => return Ok(()), // No key set = no auth required (localhost only)
+        None => return Ok(()), // No key set = no auth required
     };
 
     // Check x-api-key header (Anthropic style)
@@ -348,8 +355,6 @@ fn check_auth(state: &AppState, headers: &axum::http::HeaderMap) -> Result<(), R
     if let Some(v) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
         if v.strip_prefix("Bearer ").unwrap_or("") == key { return Ok(()); }
     }
-    // localhost always allowed
-    // (peer addr check would need extractor, skip for simplicity)
 
     Err(error_response(401, "Invalid API key. Set x-api-key or Authorization: Bearer header."))
 }
@@ -358,10 +363,11 @@ fn check_auth(state: &AppState, headers: &axum::http::HeaderMap) -> Result<(), R
 
 async fn handle_messages(
     State(state): State<Arc<AppState>>,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
     Json(req): Json<AnthropicRequest>,
 ) -> Response {
-    if let Err(e) = check_auth(&state, &headers) { return e; }
+    if let Err(e) = check_auth(&state, &headers, Some(&peer)) { return e; }
     let model_name = req.model.as_deref().unwrap_or("claude-sonnet-4-6");
     let stream = req.stream.unwrap_or(false);
 
@@ -687,5 +693,7 @@ async fn main() {
         .await
         .unwrap();
     eprintln!("Listening on :{port}");
-    axum::serve(listener, app).await.unwrap();
+    eprintln!("  Localhost: no key needed");
+    eprintln!("  Remote: API key required");
+    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap();
 }
