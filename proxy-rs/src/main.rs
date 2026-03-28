@@ -21,6 +21,7 @@ struct AppState {
     client: Client,
     models: HashMap<String, Backend>,
     routes: HashMap<String, String>,
+    api_key: Option<String>,
 }
 
 #[derive(Clone)]
@@ -331,12 +332,36 @@ fn oai_to_anthropic(data: &Value, model: &str) -> Value {
     })
 }
 
+// ── Auth ──
+
+fn check_auth(state: &AppState, headers: &axum::http::HeaderMap) -> Result<(), Response> {
+    let key = match &state.api_key {
+        Some(k) => k,
+        None => return Ok(()), // No key set = no auth required (localhost only)
+    };
+
+    // Check x-api-key header (Anthropic style)
+    if let Some(v) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
+        if v == key { return Ok(()); }
+    }
+    // Check Authorization: Bearer (OpenAI style)
+    if let Some(v) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        if v.strip_prefix("Bearer ").unwrap_or("") == key { return Ok(()); }
+    }
+    // localhost always allowed
+    // (peer addr check would need extractor, skip for simplicity)
+
+    Err(error_response(401, "Invalid API key. Set x-api-key or Authorization: Bearer header."))
+}
+
 // ── Handlers ──
 
 async fn handle_messages(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<AnthropicRequest>,
 ) -> Response {
+    if let Err(e) = check_auth(&state, &headers) { return e; }
     let model_name = req.model.as_deref().unwrap_or("claude-sonnet-4-6");
     let stream = req.stream.unwrap_or(false);
 
@@ -607,9 +632,27 @@ fn chrono_now() -> String {
 async fn main() {
     let (models, routes) = default_config();
 
+    // API key: from env, file, or generate new one
+    let api_key = env::var("LOCAL_AI_KEY").ok().or_else(|| {
+        let key_path = format!("{}/.local-ai-key", env::var("HOME").unwrap_or_default());
+        std::fs::read_to_string(&key_path).ok().map(|s| s.trim().to_string()).or_else(|| {
+            // Generate new key
+            let key = format!("lai-{}", &uuid::Uuid::new_v4().to_string().replace("-", ""));
+            let _ = std::fs::write(&key_path, &key);
+            eprintln!("  Generated API key: {key}");
+            eprintln!("  Saved to: {key_path}");
+            Some(key)
+        })
+    });
+
     eprintln!("=== Anthropic Proxy (Rust/axum) ===");
     for (key, backend) in &models {
         eprintln!("  [{key}] {} -> :{} ({})", backend.mlx_model, backend.port, backend.label);
+    }
+    if let Some(ref k) = api_key {
+        eprintln!("  Auth: API key enabled ({}...)", &k[..8.min(k.len())]);
+    } else {
+        eprintln!("  Auth: disabled (localhost only)");
     }
 
     let client = Client::builder()
@@ -624,6 +667,7 @@ async fn main() {
         client,
         models,
         routes,
+        api_key,
     });
 
     let app = Router::new()

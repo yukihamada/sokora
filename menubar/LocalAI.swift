@@ -294,6 +294,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func copyURL() {
         let pb = NSPasteboard.general
         pb.clearContents()
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let key = (try? String(contentsOf: home.appendingPathComponent(".local-ai-key"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "sk-ant-dummy"
+
         // Get en0 IP
         let p = Process()
         let pipe = Pipe()
@@ -303,9 +306,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         try? p.run()
         p.waitUntilExit()
         let ip = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "127.0.0.1"
-        let url = "http://\(ip):4001"
-        pb.setString(url, forType: .string)
-        showAlert("Copied!", "\(url)\n\nPaste as ANTHROPIC_BASE_URL to use from other machines.")
+
+        let info = """
+        export ANTHROPIC_BASE_URL=http://\(ip):4001
+        export ANTHROPIC_API_KEY=\(key)
+        claude
+        """
+        pb.setString(info, forType: .string)
+        showAlert("Copied to Clipboard!",
+            "Paste this on another Mac:\n\n" +
+            "export ANTHROPIC_BASE_URL=http://\(ip):4001\n" +
+            "export ANTHROPIC_API_KEY=\(key)\n" +
+            "claude\n\n" +
+            "Or use SSH tunnel for extra security:\n" +
+            "ssh -L 4001:127.0.0.1:4001 \(NSUserName())@\(ip)")
     }
 
     @objc func openGitHub() {
