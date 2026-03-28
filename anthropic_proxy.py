@@ -1,10 +1,51 @@
 """Anthropic Messages API -> OpenAI Chat Completions proxy for MLX
-Supports: text, streaming, tool_use/tool_result conversion"""
-import json, uuid, time
+Supports: text, streaming, tool_use/tool_result, multi-model routing"""
+import json, uuid, time, os
 from aiohttp import web, ClientSession
 
-MLX_URL = "http://127.0.0.1:5000/v1/chat/completions"
-MLX_MODEL = "mlx-community/Qwen3.5-122B-A10B-4bit"
+# ── Multi-model configuration ──
+# Each MLX server runs on its own port. The proxy routes based on the
+# Anthropic model name that Claude Code sends.
+#
+# Add models by:
+#   1. Adding an entry to MODELS below
+#   2. Starting an MLX server on the specified port
+#   3. (Optional) map additional Anthropic names in MODEL_ROUTES
+
+MODELS = {
+    "main": {
+        "mlx_model": os.environ.get("MLX_MODEL_MAIN", "mlx-community/Qwen3.5-122B-A10B-4bit"),
+        "port": int(os.environ.get("MLX_PORT_MAIN", "5000")),
+        "label": "Qwen3.5-122B (general)",
+    },
+    "fast": {
+        "mlx_model": os.environ.get("MLX_MODEL_FAST", "mlx-community/Qwen3.5-35B-A3B-4bit"),
+        "port": int(os.environ.get("MLX_PORT_FAST", "5001")),
+        "label": "Qwen3.5-35B-A3B (fast)",
+    },
+}
+
+# Map Anthropic model names -> which backend to use
+MODEL_ROUTES = {
+    # Sonnet/Opus -> main (122B)
+    "claude-sonnet-4-6":          "main",
+    "claude-sonnet-4-6-20250514": "main",
+    "claude-opus-4-6":            "main",
+    "claude-opus-4-6-20250514":   "main",
+    "claude-3-5-sonnet-20241022": "main",
+    "claude-3-5-sonnet-latest":   "main",
+    # Haiku -> fast (35B)
+    "claude-haiku-4-5-20251001":  "fast",
+    "claude-3-5-haiku-latest":    "fast",
+}
+
+DEFAULT_BACKEND = "main"
+
+def get_backend(anthropic_model):
+    """Resolve Anthropic model name to MLX backend config"""
+    key = MODEL_ROUTES.get(anthropic_model, DEFAULT_BACKEND)
+    backend = MODELS.get(key, MODELS["main"])
+    return backend
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -158,10 +199,12 @@ async def handle_messages(request):
     model = body.get("model", "claude-sonnet-4-6")
     stream = body.get("stream", False)
     tools = body.get("tools", None)
-    log(f"POST /v1/messages model={model} stream={stream} tools={len(tools) if tools else 0}")
+    backend = get_backend(model)
+    mlx_url = f"http://127.0.0.1:{backend['port']}/v1/chat/completions"
+    log(f"POST /v1/messages model={model} -> {backend['label']} :{backend['port']} stream={stream} tools={len(tools) if tools else 0}")
 
     oai_body = {
-        "model": MLX_MODEL,
+        "model": backend["mlx_model"],
         "messages": convert_messages(body.get("messages", []), body.get("system", "")),
         "max_tokens": body.get("max_tokens", 4096),
         "chat_template_kwargs": {"enable_thinking": False},
@@ -172,16 +215,16 @@ async def handle_messages(request):
         oai_body["tools"] = convert_tools(tools)
 
     if stream:
-        return await handle_stream(request, oai_body, model)
+        return await handle_stream(request, oai_body, model, mlx_url)
 
     # Non-streaming
     async with ClientSession() as session:
-        async with session.post(MLX_URL, json=oai_body) as resp:
+        async with session.post(mlx_url, json=oai_body) as resp:
             data = await resp.json()
 
     return web.json_response(oai_response_to_anthropic(data, model))
 
-async def handle_stream(request, oai_body, model):
+async def handle_stream(request, oai_body, model, mlx_url):
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
     response = web.StreamResponse()
     response.headers["Content-Type"] = "text/event-stream"
@@ -211,7 +254,7 @@ async def handle_stream(request, oai_body, model):
     tool_blocks_started = {}  # index -> bool
 
     async with ClientSession() as session:
-        async with session.post(MLX_URL, json=oai_body) as resp:
+        async with session.post(mlx_url, json=oai_body) as resp:
             async for line in resp.content:
                 line = line.decode().strip()
                 if not line.startswith("data: "):
@@ -325,7 +368,7 @@ async def handle_models(request):
     log(f"GET /v1/models")
     return web.json_response({
         "data": [{"id": m, "object": "model", "created": 1677610602, "owned_by": "anthropic"}
-                 for m in ["claude-sonnet-4-6","claude-opus-4-6","claude-3-5-sonnet-20241022"]],
+                 for m in MODEL_ROUTES.keys()],
         "object": "list"
     })
 
@@ -341,5 +384,7 @@ app.router.add_get("/v1/models", handle_models)
 app.router.add_route("*", "/{path:.*}", catch_all)
 
 if __name__ == "__main__":
-    log("Anthropic proxy on :4001 -> MLX :5000 (with tool_use support)")
+    for name, cfg in MODELS.items():
+        log(f"  [{name}] {cfg['mlx_model']} -> :{cfg['port']} ({cfg['label']})")
+    log(f"Anthropic proxy on :4001 (multi-model, tool_use)")
     web.run_app(app, host="0.0.0.0", port=4001, print=lambda x: log(x))

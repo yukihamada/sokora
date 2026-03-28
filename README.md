@@ -7,11 +7,18 @@ Apple Silicon Mac で Claude Code をローカル実行。API費用ゼロ、ツ�
 ## 仕組み
 
 ```
-Claude Code  →  Anthropic Proxy (:4001)  →  MLX Server (:5000)  →  Qwen3.5-122B
-  (tool_use)     (Anthropic↔OpenAI変換)       (Apple GPU)            (4bit, ~60GB RAM)
+                                          ┌─ MLX :5000 → Qwen3.5-122B (Sonnet/Opus)
+Claude Code  →  Anthropic Proxy (:4001) ──┤
+  (tool_use)     (自動モデル振り分け)       └─ MLX :5001 → Qwen3.5-35B  (Haiku/高速)
 ```
 
-Claude Code は本家 Anthropic API と同じプロトコルで通信するので、コマンド実行・ファイル読み書き・コード生成がそのまま動く。
+Claude Code は本家 Anthropic API と同じプロトコルで通信。プロキシがモデル名を見て自動的に振り分ける:
+
+| Claude Code が送るモデル名 | 振り分け先 | 用途 |
+|---------------------------|-----------|------|
+| `claude-sonnet-4-6` | Qwen3.5-122B (:5000) | 汎用・高品質 |
+| `claude-opus-4-6` | Qwen3.5-122B (:5000) | 汎用・高品質 |
+| `claude-haiku-4-5` | Qwen3.5-35B-A3B (:5001) | 高速・軽量 |
 
 ## 必要なもの
 
@@ -93,29 +100,45 @@ Anthropic Messages API と OpenAI Chat Completions API を相互変換する軽�
 
 ## モデル
 
-**Qwen3.5-122B-A10B-4bit**（mlx-community）
-- 122B パラメータ（MoE、アクティブ ~10B）
-- 4bit量子化、ディスク ~40GB、RAM ~60GB
-- 100以上の言語に対応、コード生成に強い
-- ツール呼び出し（function calling）ネイティブ対応
+| スロット | モデル | パラメータ | RAM | 用途 |
+|---------|-------|-----------|-----|------|
+| main (:5000) | Qwen3.5-122B-A10B-4bit | 122B (MoE, active 10B) | ~60GB | 汎用・高品質 |
+| fast (:5001) | Qwen3.5-35B-A3B-4bit | 35B (MoE, active 3B) | ~8GB | 高速・軽量タスク |
+
+128GB Mac なら両方同時に載る。64GB の場合は main のみ起動される。
 
 ## カスタマイズ
 
 ### 別のモデルを使う
 
-`setup.sh` と `anthropic_proxy.py` の `MODEL` を変更:
+環境変数で上書き、または `~/ai.sh` と `anthropic_proxy.py` を編集:
 
 ```bash
-# 小さめ（32GB+ RAM）
-MODEL="mlx-community/Qwen3-32B-4bit"
+# 環境変数で上書き
+export MLX_MODEL_MAIN="mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit"
+export MLX_MODEL_FAST="mlx-community/Qwen3.5-9B-4bit"
 
-# さらに小さめ（16GB+ RAM）
-MODEL="mlx-community/Qwen3-8B-4bit"
+# おすすめの組み合わせ
+# 128GB: 122B + 35B（デフォルト）
+# 64GB:  35B + 9B
+# 32GB:  9B のみ
+```
+
+### モデルルーティングを変更
+
+`anthropic_proxy.py` の `MODEL_ROUTES` を編集:
+
+```python
+MODEL_ROUTES = {
+    "claude-sonnet-4-6": "main",   # → 122B
+    "claude-haiku-4-5":  "fast",   # → 35B
+    "claude-opus-4-6":   "main",   # → 122B
+}
 ```
 
 ### ポート変更
 
-`~/ai.sh` の `MLX_PORT` と `PROXY_PORT` を編集。
+`~/ai.sh` の `PORT_MAIN`, `PORT_FAST`, `PROXY_PORT` を編集。
 
 ## トラブルシューティング
 
