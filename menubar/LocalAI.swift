@@ -7,7 +7,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "🧠💤"
+        statusItem.button?.title = "AI"
         buildMenu()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.updateIcon()
@@ -52,9 +52,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             let running = self.ports.filter { self.isPortAlive($0.0) }.count
             DispatchQueue.main.async {
-                if running == self.ports.count { self.statusItem.button?.title = "🧠" }
-                else if running > 0 { self.statusItem.button?.title = "🧠⚡" }
-                else { self.statusItem.button?.title = "🧠💤" }
+                if running == self.ports.count { self.statusItem.button?.title = "AI" }
+                else if running > 0 { self.statusItem.button?.title = "AI·" }
+                else { self.statusItem.button?.title = "AI" }
             }
         }
     }
@@ -81,7 +81,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func startAll() {
-        statusItem.button?.title = "🧠⏳"
+        statusItem.button?.title = "AI…"
         DispatchQueue.global().async { [weak self] in
             let _ = self?.runAI("start")
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self?.updateIcon() }
@@ -91,12 +91,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func stopAll() {
         let _ = runAI("stop")
-        statusItem.button?.title = "🧠💤"
+        statusItem.button?.title = "AI"
         notify("Local AI", "Servers stopped")
     }
 
     @objc func restartAll() {
-        statusItem.button?.title = "🧠⏳"
+        statusItem.button?.title = "AI…"
         DispatchQueue.global().async { [weak self] in
             let _ = self?.runAI("stop")
             sleep(2)
