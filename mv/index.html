@@ -2,313 +2,401 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>LOCAL AI — Apple Silicon Anthem</title>
-<meta name="description" content="M5 Mac で Claude Code をローカル実行。API費用ゼロ、爆速AI開発環境の作り方を歌にした。">
-<meta property="og:title" content="LOCAL AI — Apple Silicon Anthem">
-<meta property="og:description" content="bash setup.sh — たった1コマンドで始まる革命">
+<title>LOCAL AI — ローカルで動くClaude Code</title>
+<meta name="description" content="M5 Macに1コマンドでAIをインストール。API費用ゼロ、完全ローカルでClaude Codeが動く。">
+<meta property="og:title" content="LOCAL AI — ローカルで動くClaude Code">
+<meta property="og:description" content="bash setup.sh だけ。あとは全部ローカルで。">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-:root{--bg:#0d1117;--fg:#e0e0e0;--cyan:#58a6ff;--green:#3fb950;--pink:#f778ba;--yellow:#e3b341;--red:#f85149;--purple:#bc8cff;--dim:#484f58;--accent:#58a6ff;}
+:root{--bg:#0d1117;--fg:#c9d1d9;--cyan:#58a6ff;--green:#3fb950;--yellow:#e3b341;--red:#f85149;--purple:#bc8cff;--pink:#f778ba;--dim:#484f58;--border:#30363d;}
 html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);font-family:'JetBrains Mono',monospace;}
 
-#chrome{position:fixed;top:0;left:0;right:0;height:32px;background:#161b22;border-bottom:1px solid #30363d;display:flex;align-items:center;padding:0 12px;z-index:100;}
-.dot{width:10px;height:10px;border-radius:50%;margin-right:6px;}
+/* Terminal frame */
+#chrome{position:fixed;top:0;left:0;right:0;height:36px;background:#161b22;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;z-index:100;}
+.dot{width:12px;height:12px;border-radius:50%;margin-right:7px;cursor:pointer;}
 .dot.r{background:var(--red);}.dot.y{background:var(--yellow);}.dot.g{background:var(--green);}
-#chrome .title{margin-left:12px;font-size:11px;color:var(--dim);flex:1;text-align:center;}
+#chrome .title{flex:1;text-align:center;font-size:12px;color:var(--dim);}
 
-#term{position:fixed;top:32px;bottom:60px;left:0;right:0;overflow:hidden;padding:16px;font-size:13px;line-height:1.7;}
-
-#logo{position:fixed;top:40px;left:50%;transform:translateX(-50%);font-size:11px;line-height:1.35;color:var(--cyan);opacity:.3;white-space:pre;z-index:10;text-align:left;}
-
+/* Main terminal */
+#term{position:fixed;top:36px;bottom:56px;left:0;right:0;overflow:hidden;padding:20px;font-size:14px;line-height:1.8;}
 #output{white-space:pre-wrap;word-break:break-all;}
+
+/* Line styles */
 .prompt{color:var(--cyan);}
-.cmd{color:#fff;}.comment{color:var(--dim);font-style:italic;}
-.highlight{color:var(--cyan);}
-.warn{color:var(--yellow);}
-.err{color:var(--red);}
+.cmd{color:#fff;font-weight:700;}
+.comment{color:var(--dim);font-style:italic;}
+.out{color:var(--fg);}
 .green{color:var(--green);}
-.pink{color:var(--pink);}.purple{color:var(--purple);}
+.cyan{color:var(--cyan);}
+.yellow{color:var(--yellow);}
+.red{color:var(--red);}
+.pink{color:var(--pink);}
+.purple{color:var(--purple);}
 .bold{font-weight:700;}
-.typing{border-right:2px solid var(--cyan);animation:blink .6s step-end infinite;}
+.dim{color:var(--dim);font-size:12px;}
+.big{font-size:16px;font-weight:700;color:var(--cyan);margin:8px 0;}
+.typing{border-right:2px solid var(--cyan);animation:blink .5s step-end infinite;}
 @keyframes blink{50%{border-color:transparent}}
 
-#status{position:fixed;bottom:28px;left:0;right:0;height:32px;background:#161b22;border-top:1px solid #30363d;display:flex;align-items:center;padding:0 12px;font-size:10px;z-index:100;}
-#status .left{color:var(--cyan);flex:1;}
-#status .mid{color:var(--dim);flex:1;text-align:center;}
-#status .right{color:var(--green);flex:1;text-align:right;}
+/* Subtitle bar — big readable lyrics */
+#subtitle{position:fixed;bottom:56px;left:0;right:0;height:48px;background:rgba(22,27,34,0.95);border-top:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--cyan);font-weight:700;z-index:100;letter-spacing:0.05em;text-align:center;padding:0 20px;}
 
-#seekbar{position:fixed;bottom:0;left:0;right:0;height:28px;background:#0d1117;display:flex;align-items:center;padding:0 12px;gap:8px;z-index:100;}
-#seekbar input{flex:1;height:3px;-webkit-appearance:none;background:#30363d;border-radius:2px;cursor:pointer;}
-#seekbar input::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--cyan);cursor:pointer;}
-#seekbar .time{font-size:9px;color:var(--dim);min-width:40px;}
+/* Bottom bar */
+#bottom{position:fixed;bottom:0;left:0;right:0;height:56px;background:#0d1117;display:flex;align-items:center;padding:0 16px;gap:12px;z-index:100;border-top:1px solid var(--border);}
+#bottom .btn{background:var(--cyan);color:#0d1117;border:none;padding:6px 16px;border-radius:4px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;}
+#bottom .btn:hover{opacity:0.8;}
+#bottom .btn.stop{background:var(--red);}
+#bottom .progress{flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden;cursor:pointer;}
+#bottom .progress-fill{height:100%;background:var(--cyan);width:0%;transition:width 0.3s;}
+#bottom .time{font-size:11px;color:var(--dim);min-width:80px;text-align:right;}
+#bottom .section{font-size:11px;color:var(--purple);min-width:100px;}
 
-#viz{position:fixed;bottom:28px;left:0;right:0;height:30px;display:flex;align-items:flex-end;justify-content:center;gap:1px;padding:0 5%;pointer-events:none;z-index:99;opacity:.3;}
-.vb{width:2px;background:var(--cyan);border-radius:1px 1px 0 0;}
+/* Start screen */
+#start{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:opacity .5s;}
+#start .logo{color:var(--cyan);font-size:clamp(12px,3vw,18px);line-height:1.4;margin-bottom:24px;text-align:center;}
+#start .desc{color:var(--fg);font-size:14px;max-width:500px;text-align:center;line-height:1.8;margin-bottom:32px;}
+#start .desc span{color:var(--green);}
+#start .play{color:var(--green);font-size:18px;animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 
-#start{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:opacity .4s;}
-#start pre{color:var(--cyan);font-size:clamp(10px,2.5vw,14px);line-height:1.3;text-align:left;margin-bottom:20px;}
-#start .sub{color:var(--dim);font-size:12px;letter-spacing:.15em;}
-#start .play-hint{margin-top:20px;color:var(--green);font-size:14px;animation:pulse 1.5s infinite;}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-
-@media(max-width:600px){#term{font-size:11px;padding:10px;}#logo{font-size:7px;}}
+/* Responsive */
+@media(max-width:600px){
+  #term{font-size:12px;padding:12px;}
+  #subtitle{font-size:13px;height:40px;}
+  #start .desc{font-size:12px;padding:0 20px;}
+}
 </style>
 </head>
 <body>
 
+<!-- ============ START SCREEN ============ -->
 <div id="start" onclick="go()">
-<pre>
+<pre class="logo">
   ╦  ╔═╗╔═╗╔═╗╦    ╔═╗╦
   ║  ║ ║║  ╠═╣║    ╠═╣║
   ╩═╝╚═╝╚═╝╩ ╩╩═╝  ╩ ╩╩
 </pre>
-<div class="sub">APPLE SILICON AI ANTHEM</div>
-<div class="play-hint">[ CLICK TO EXECUTE ]</div>
+<div class="desc">
+  Macに<span>1コマンド</span>でAIをインストール。<br>
+  API費用ゼロ。完全ローカル。<br>
+  Claude Codeがそのまま動く。
+</div>
+<div class="play">[ ▶ タップして体験する ]</div>
 </div>
 
+<!-- ============ TERMINAL ============ -->
 <div id="chrome">
-  <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-  <div class="title">ai.sh — ~/local-claude</div>
+  <div class="dot r" title="Stop" onclick="cmdStop()"></div>
+  <div class="dot y" title="Status"></div>
+  <div class="dot g" title="Start"></div>
+  <div class="title">Terminal — ~/local-claude</div>
 </div>
-
-<div id="logo">  ╦  ╔═╗╔═╗╔═╗╦    ╔═╗╦
-  ║  ║ ║║  ╠═╣║    ╠═╣║
-  ╩═╝╚═╝╚═╝╩ ╩╩═╝  ╩ ╩╩
-  <span style="color:var(--dim)">Apple Silicon AI Runtime</span></div>
 
 <div id="term"><div id="output"></div></div>
 
-<div id="viz"></div>
+<div id="subtitle"></div>
 
-<div id="status">
-  <div class="left" id="s-model">MLX · Qwen3.5-122B</div>
-  <div class="mid" id="s-section">--</div>
-  <div class="right" id="s-speed">60 tok/s</div>
-</div>
-
-<div id="seekbar">
-  <span class="time" id="t-cur">0:00</span>
-  <input type="range" id="seek" min="0" max="180" value="0" oninput="audio.currentTime=this.value">
-  <span class="time" id="t-dur">3:00</span>
+<div id="bottom">
+  <button class="btn" id="playBtn" onclick="togglePlay()">▶</button>
+  <div class="section" id="sectionLabel">--</div>
+  <div class="progress" onclick="seek(event)"><div class="progress-fill" id="progressFill"></div></div>
+  <div class="time" id="timeLabel">0:00 / 3:00</div>
 </div>
 
 <script>
-// ── Audio (Web Audio API synth — no external file needed) ──
-const AC = new (window.AudioContext||window.webkitAudioContext)();
-let audio, anl;
+// ============================================================
+//  TIMELINE — 実際のインストール→使用フローをそのまま再現
+//  初心者が「これ俺もやりたい」と思える内容
+// ============================================================
+const LINES = [
+// ── シーン1: まず何が必要か ──
+{t:0,    type:'big',     text:'Step 1: インストール（1コマンド）'},
+{t:0,    sub:'たった1行で、AIが自分のMacに住み始める'},
+{t:2,    type:'comment', text:'# Mac（M1以降, 64GB+）があればOK。M5 128GBが最強。'},
+{t:4,    type:'comment', text:'# まずセットアップスクリプトをダウンロードして実行するだけ。'},
+{t:6,    type:'cmd',     text:'$ bash setup.sh'},
+{t:6,    sub:'これだけ。あとは全自動。'},
 
-function createSynth() {
-  // Create a simple beat track using oscillators
-  const osc = AC.createOscillator();
-  const gain = AC.createGain();
-  osc.type = 'sine';
-  osc.frequency.value = 110;
-  gain.gain.value = 0;
-  osc.connect(gain);
-  gain.connect(AC.destination);
-  osc.start();
+{t:9,    type:'out',     text:'========================================'},
+{t:9.5,  type:'cyan',    text:' Local Claude Code Setup'},
+{t:10,   type:'out',     text:'========================================'},
+{t:11,   type:'out',     text:'[1/6] Checking Homebrew & Python...'},
+{t:11,   sub:'Pythonの環境を自動チェック'},
+{t:13,   type:'out',     text:'[2/6] Setting up venv & dependencies...'},
+{t:13,   sub:'MLX（Apple専用AIエンジン）をインストール中'},
+{t:15,   type:'green',   text:'  mlx-lm 0.31.1 installed'},
+{t:17,   type:'out',     text:'[3/6] Downloading AI model...'},
+{t:17,   sub:'122億パラメータのAIモデルをダウンロード（約40GB）'},
+{t:19,   type:'dim',     text:'  Qwen3.5-122B-A10B-4bit ████████████████ 100%'},
+{t:21,   type:'out',     text:'[4/6] Writing proxy server...'},
+{t:21,   sub:'Claude Codeが理解できる形式に翻訳するプロキシ'},
+{t:23,   type:'out',     text:'[5/6] Writing ai.sh...'},
+{t:25,   type:'out',     text:'[6/6] Configuring shell & Claude Code...'},
+{t:27,   type:'green',   text:'-> Local Qwen3.5 (MLX)'},
 
-  // Use a silent audio element for timing
-  audio = document.createElement('audio');
-  // Generate silence data URL (3 min)
-  const sr = 8000, dur = 180, samples = sr * dur;
-  const buffer = new ArrayBuffer(44 + samples);
-  const view = new DataView(buffer);
-  // WAV header
-  const writeStr = (o,s) => { for(let i=0;i<s.length;i++) view.setUint8(o+i,s.charCodeAt(i)); };
-  writeStr(0,'RIFF'); view.setUint32(4,36+samples,true); writeStr(8,'WAVE');
-  writeStr(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true);
-  view.setUint16(22,1,true); view.setUint32(24,sr,true); view.setUint32(28,sr,true);
-  view.setUint16(32,1,true); view.setUint16(34,8,true);
-  writeStr(36,'data'); view.setUint32(40,samples,true);
-  for(let i=0;i<samples;i++) view.setUint8(44+i,128);
-  const blob = new Blob([buffer],{type:'audio/wav'});
-  audio.src = URL.createObjectURL(blob);
+{t:29,   type:'out',     text:'========================================'},
+{t:29.5, type:'green',   text:' Setup complete!'},
+{t:30,   type:'out',     text:'========================================'},
+{t:30,   sub:'完了！ たったの数分で全部入った。'},
+{t:32,   type:'dim',     text:'  1. ~/ai.sh start   → AIサーバー起動'},
+{t:33,   type:'dim',     text:'  2. cld              → Claude Code（ローカル）'},
+{t:34,   type:'dim',     text:'  3. clc              → Claude Code（本家クラウド）'},
 
-  // Beat scheduler
-  let beatId;
-  function scheduleBeat() {
-    if (!audio.paused) {
-      const ct = audio.currentTime;
-      const bpm = 120;
-      const beatTime = 60/bpm;
-      // Kick
-      const kick = AC.createOscillator();
-      const kickGain = AC.createGain();
-      kick.type = 'sine';
-      kick.frequency.value = 60;
-      kickGain.gain.setValueAtTime(0.3, AC.currentTime);
-      kickGain.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + 0.15);
-      kick.connect(kickGain);
-      kickGain.connect(AC.destination);
-      kick.start(AC.currentTime);
-      kick.stop(AC.currentTime + 0.15);
+// ── シーン2: 起動 ──
+{t:37,   type:'big',     text:'Step 2: AIサーバーを起動する'},
+{t:37,   sub:'1コマンドで、4つのAIが同時に立ち上がる'},
+{t:39,   type:'cmd',     text:'$ ~/ai.sh start'},
 
-      // Hi-hat
-      if (Math.random() > 0.3) {
-        const noise = AC.createOscillator();
-        const ng = AC.createGain();
-        noise.type = 'square';
-        noise.frequency.value = 4000 + Math.random() * 4000;
-        ng.gain.setValueAtTime(0.05, AC.currentTime);
-        ng.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + 0.05);
-        noise.connect(ng); ng.connect(AC.destination);
-        noise.start(AC.currentTime); noise.stop(AC.currentTime + 0.05);
-      }
+{t:41,   type:'cyan',    text:'  ╦  ╔═╗╔═╗╔═╗╦    ╔═╗╦'},
+{t:41.3, type:'cyan',    text:'  ║  ║ ║║  ╠═╣║    ╠═╣║'},
+{t:41.6, type:'cyan',    text:'  ╩═╝╚═╝╚═╝╩ ╩╩═╝  ╩ ╩╩'},
+{t:42,   type:'dim',     text:'  Apple Silicon AI Runtime'},
+{t:43,   type:'out',     text:''},
+{t:43.5, type:'out',     text:'  Starting servers (optimized)...'},
+{t:43.5, sub:'Apple GPUの力で、122Bモデルが10秒で起動する'},
+
+{t:45,   type:'green',   text:'  ● LLM 122B (Sonnet/Opus)  :5000'},
+{t:45,   sub:'メインの大型AI。コード生成、設計、分析に。'},
+{t:47,   type:'green',   text:'  ● LLM 35B  (Haiku)        :5001'},
+{t:47,   sub:'軽量で高速なAI。簡単な質問、補完に。116 tok/s。'},
+{t:49,   type:'green',   text:'  ● Vision 8B               :5002'},
+{t:49,   sub:'画像を理解するAI。スクショを見せれば内容を読み取る。'},
+{t:51,   type:'green',   text:'  ● Proxy (Rust/axum)       :4001'},
+{t:51,   sub:'Rustで書いた爆速プロキシ。レイテンシわずか262ms。'},
+
+{t:53,   type:'out',     text:''},
+{t:53.5, type:'green',   text:'  Ready! http://192.168.0.47:4001'},
+{t:53.5, sub:'全部グリーン。これで準備完了。'},
+
+// ── シーン3: Claude Codeを起動 ──
+{t:57,   type:'big',     text:'Step 3: Claude Code を使う'},
+{t:57,   sub:'見た目も操作も本家と全く同じ'},
+{t:59,   type:'cmd',     text:'$ cld'},
+{t:59,   sub:'cld = Claude Code（ローカル）。clc = 本家クラウド。'},
+
+{t:62,   type:'dim',     text:'  ╭─────────────────────────────────────╮'},
+{t:62.5, type:'dim',     text:'  │  Claude Code   (local-ai)          │'},
+{t:63,   type:'dim',     text:'  │  Model: Qwen3.5-122B  60 tok/s     │'},
+{t:63.5, type:'dim',     text:'  ╰─────────────────────────────────────╯'},
+
+{t:65,   type:'cmd',     text:'❯ このディレクトリのファイルを一覧して'},
+{t:65,   sub:'日本語で指示するだけ。AIがコマンドを自動実行する。'},
+
+{t:68,   type:'purple',  text:'  ⏵ Bash  ls -la'},
+{t:68,   sub:'AIが「ls -la を実行しよう」と判断して自動で叩く'},
+{t:70,   type:'out',     text:'  total 96'},
+{t:70.5, type:'out',     text:'  -rw-r--r--  README.md'},
+{t:71,   type:'out',     text:'  -rw-r--r--  setup.sh'},
+{t:71.5, type:'out',     text:'  -rw-r--r--  anthropic_proxy.py'},
+{t:72,   type:'out',     text:'  drwxr-xr-x  proxy-rs/'},
+
+{t:73.5, type:'green',   text:'  4つのファイルがあります：'},
+{t:74,   type:'out',     text:'  README.md — ドキュメント'},
+{t:74.5, type:'out',     text:'  setup.sh — セットアップスクリプト'},
+{t:75,   type:'out',     text:'  anthropic_proxy.py — API変換プロキシ'},
+{t:75.5, type:'out',     text:'  proxy-rs/ — Rust版プロキシ'},
+{t:75.5, sub:'ツール実行が動いた！ 本家と同じようにファイルを読み書きできる'},
+
+// ── シーン4: コード生成 ──
+{t:79,   type:'big',     text:'Step 4: コードを書かせる'},
+{t:79,   sub:'API費用ゼロで、何度でも使い放題'},
+{t:81,   type:'cmd',     text:'❯ Pythonでクイックソートを書いて'},
+
+{t:83,   type:'out',     text:'  def quicksort(arr):'},
+{t:83.5, type:'out',     text:'      if len(arr) <= 1:'},
+{t:84,   type:'out',     text:'          return arr'},
+{t:84.5, type:'out',     text:'      pivot = arr[len(arr) // 2]'},
+{t:85,   type:'out',     text:'      left = [x for x in arr if x < pivot]'},
+{t:85.5, type:'out',     text:'      mid  = [x for x in arr if x == pivot]'},
+{t:86,   type:'out',     text:'      right= [x for x in arr if x > pivot]'},
+{t:86.5, type:'out',     text:'      return quicksort(left) + mid + quicksort(right)'},
+{t:86.5, sub:'60 tok/s で滑らかにコードが生成される'},
+
+// ── シーン5: 画像生成 ──
+{t:90,   type:'big',     text:'Step 5: 画像も生成できる'},
+{t:90,   sub:'FLUX.1-schnell — 1024x1024が17秒'},
+{t:92,   type:'cmd',     text:'$ ~/ai.sh img "サイバーパンクな東京の夜、ネオン、雨"'},
+
+{t:94,   type:'out',     text:'  Generating image...'},
+{t:95,   type:'dim',     text:'  ████████████████████ 100%  (17.2s)'},
+{t:97,   type:'green',   text:'  ● ~/generated/cyberpunk_tokyo.png'},
+{t:97,   sub:'たった17秒でフォトリアルな画像が生成された'},
+
+// ── シーン6: 動画生成 ──
+{t:101,  type:'big',     text:'Step 6: 動画まで作れる'},
+{t:101,  sub:'Wan 2.1 — テキストから映画品質の動画を生成'},
+{t:103,  type:'cmd',     text:'$ ~/ai.sh vid "侍が崖の上に立つ、夕焼け、風"'},
+{t:105,  type:'out',     text:'  Generating video (~10 min)...'},
+{t:106,  type:'dim',     text:'  ████████████████████ 100%  (619.4s)'},
+{t:108,  type:'green',   text:'  ● ~/generated/samurai_video.mp4'},
+{t:108,  sub:'480x832, 17フレーム。ローカルで映画みたいな動画が作れる'},
+
+// ── シーン7: メニューバー ──
+{t:112,  type:'big',     text:'Step 7: メニューバーから操作'},
+{t:112,  sub:'ターミナルを開かなくても、メニューバーから全部できる'},
+{t:114,  type:'cmd',     text:'$ ~/ai.sh menubar'},
+{t:116,  type:'green',   text:'  ● メニューバーに 🧠 が常駐'},
+{t:116,  sub:'Start / Stop / ヘルスチェック / 画像生成、全部ワンクリック'},
+
+// ── シーン8: 切り替え ──
+{t:120,  type:'big',     text:'Step 8: クラウドとの切り替え'},
+{t:120,  sub:'ローカルとクラウド、一瞬で切り替えられる'},
+{t:122,  type:'cmd',     text:'$ clc'},
+{t:122,  sub:'clc = 本家Anthropic API。精度が必要なときはこっち'},
+{t:124,  type:'green',   text:'  -> Anthropic Cloud'},
+{t:126,  type:'cmd',     text:'$ cld'},
+{t:126,  sub:'cld = ローカルAI。費用ゼロ。プライバシー完璧。'},
+{t:128,  type:'green',   text:'  -> Local Qwen3.5 (MLX)'},
+
+// ── シーン9: パフォーマンス ──
+{t:132,  type:'big',     text:'どれくらい速いのか？'},
+{t:132,  sub:'Ollamaデフォルトから2倍以上の高速化を達成'},
+{t:134,  type:'cmd',     text:'$ ~/ai.sh bench'},
+{t:136,  type:'out',     text:'  ┌────────────────────────────────────┐'},
+{t:136.5,type:'out',     text:'  │  Ollama (default)   30 tok/s      │'},
+{t:137,  type:'yellow',  text:'  │  MLX (optimized)    60 tok/s  x2  │'},
+{t:137.5,type:'green',   text:'  │  35B Haiku         116 tok/s  x4  │'},
+{t:138,  type:'out',     text:'  ├────────────────────────────────────┤'},
+{t:138.5,type:'out',     text:'  │  Python proxy      584ms          │'},
+{t:139,  type:'cyan',    text:'  │  Rust proxy        262ms   -55%   │'},
+{t:139.5,type:'out',     text:'  └────────────────────────────────────┘'},
+{t:139.5,sub:'MLXチューニング + Rustプロキシで爆速に'},
+
+// ── シーン10: まとめ ──
+{t:143,  type:'big',     text:'全部まとめると...'},
+{t:143,  sub:'1コマンドで手に入る、完全ローカルAI開発環境'},
+{t:145,  type:'out',     text:''},
+{t:145.5,type:'green',   text:'  ✓ テキスト生成    122Bモデル, 60 tok/s'},
+{t:146.5,type:'green',   text:'  ✓ 高速テキスト    35Bモデル, 116 tok/s'},
+{t:147.5,type:'green',   text:'  ✓ 画像理解        スクショ→自動解析'},
+{t:148.5,type:'green',   text:'  ✓ 画像生成        FLUX, 17秒/枚'},
+{t:149.5,type:'green',   text:'  ✓ 動画生成        Wan 2.1, 10分'},
+{t:150.5,type:'green',   text:'  ✓ ツール実行      コマンド自動実行'},
+{t:151.5,type:'green',   text:'  ✓ メニューバー    ワンクリック操作'},
+{t:152.5,type:'green',   text:'  ✓ 月額費用        ¥0'},
+
+{t:155,  type:'out',     text:''},
+{t:155.5,type:'cmd',     text:'$ git clone github.com/yukihamada/local-claude'},
+{t:155.5,sub:'試してみたくなったら、これをコピーするだけ'},
+{t:158,  type:'cmd',     text:'$ bash setup.sh'},
+{t:160,  type:'out',     text:''},
+{t:161,  type:'cyan',    text:'  ╦  ╔═╗╔═╗╔═╗╦    ╔═╗╦'},
+{t:161.3,type:'cyan',    text:'  ║  ║ ║║  ╠═╣║    ╠═╣║'},
+{t:161.6,type:'cyan',    text:'  ╩═╝╚═╝╚═╝╩ ╩╩═╝  ╩ ╩╩'},
+{t:162,  type:'out',     text:''},
+{t:163,  type:'green',   text:'  github.com/yukihamada/local-claude'},
+{t:163,  sub:'Star してくれたら嬉しい'},
+{t:166,  type:'dim',     text:'  ★ あなたのMacでも、今日から使えます。'},
+];
+
+// ============================================================
+//  ENGINE
+// ============================================================
+const out = document.getElementById('output');
+const subEl = document.getElementById('subtitle');
+let curLine = -1;
+let timer = null;
+let startTime = 0;
+let playing = false;
+let currentTime = 0;
+const DURATION = 170;
+
+const audio = { currentTime: 0, paused: true };
+
+function go() {
+  document.getElementById('start').style.opacity = '0';
+  setTimeout(() => document.getElementById('start').style.display = 'none', 500);
+  startTime = performance.now() / 1000;
+  playing = true;
+  audio.paused = false;
+  document.getElementById('playBtn').textContent = '⏸';
+  requestAnimationFrame(loop);
+  // Start beat
+  startBeat();
+}
+
+function togglePlay() {
+  if (!playing && startTime === 0) { go(); return; }
+  playing = !playing;
+  audio.paused = !playing;
+  document.getElementById('playBtn').textContent = playing ? '⏸' : '▶';
+  if (playing) {
+    startTime = performance.now() / 1000 - currentTime;
+    requestAnimationFrame(loop);
+  }
+}
+
+function cmdStop() {
+  playing = false;
+  audio.paused = true;
+  currentTime = 0;
+  curLine = -1;
+  startTime = 0;
+  out.innerHTML = '';
+  subEl.textContent = '';
+  document.getElementById('playBtn').textContent = '▶';
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('timeLabel').textContent = '0:00 / 3:00';
+  document.getElementById('sectionLabel').textContent = '--';
+}
+
+function seek(e) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const pct = (e.clientX - rect.left) / rect.width;
+  const t = pct * DURATION;
+  currentTime = t;
+  startTime = performance.now() / 1000 - t;
+  // Replay all lines up to this point
+  out.innerHTML = '';
+  curLine = -1;
+  for (let i = 0; i < LINES.length; i++) {
+    if (LINES[i].t <= t) {
+      if (LINES[i].type) addLine(LINES[i], true);
+      if (LINES[i].sub) subEl.textContent = LINES[i].sub;
+      curLine = i;
     }
-    beatId = setTimeout(scheduleBeat, 500);
   }
-  scheduleBeat();
-
-  // Analyzer for visualizer
-  anl = AC.createAnalyser();
-  anl.fftSize = 128;
-  gain.connect(anl);
 }
 
-// ── Lyrics / Timeline ──
-const L = [
-  {t:0,    type:'sys',  text:'Local AI v1.0 · M5 Max 128GB · MLX Runtime'},
-  {t:0.5,  type:'sys',  text:'~/local-claude ready.'},
-  {t:1.5,  type:'cmd',  text:'bash setup.sh  たった1コマンドの革命'},
-  {t:5,    type:'cmd',  text:'API費用ゼロ  全部ローカルで回せ'},
-  {t:9,    type:'run',  text:'$ ~/ai.sh start'},
-  {t:11,   type:'green',text:'  ● LLM 122B (Sonnet)  :5000   Ready'},
-  {t:12.5, type:'green',text:'  ● LLM 35B  (Haiku)   :5001   Ready'},
-  {t:14,   type:'green',text:'  ● Vision 8B           :5002   Ready'},
-  {t:15.5, type:'green',text:'  ● Proxy (Rust/axum)   :4001   Ready'},
-  {t:17,   type:'lyric',text:'全部グリーン  全部ローカル  全部俺のマシン'},
-
-  {t:20,   type:'hr',   text:'─── VERSE 1: THE SETUP ───'},
-  {t:21,   type:'lyric',text:'M5 Max 128ギガ  ユニファイドメモリ'},
-  {t:24.5, type:'lyric',text:'122Bが丸ごと載る  GPUと共有'},
-  {t:28,   type:'run',  text:'$ pip install mlx-lm'},
-  {t:30,   type:'lyric',text:'Ollamaじゃ遅い  MLXにスイッチ'},
-  {t:33.5, type:'highlight',text:'  30 tok/s → 60 tok/s  倍速の世界へ'},
-  {t:37,   type:'lyric',text:'prefill-step-size  prompt-cache'},
-  {t:40,   type:'lyric',text:'チューニングひとつで  33パーセント加速'},
-
-  {t:43,   type:'hr',   text:'─── CHORUS ───'},
-  {t:44,   type:'cmd',  text:'cld で起動  clc で切替'},
-  {t:47,   type:'cmd',  text:'ローカルとクラウド  シームレスに行き来'},
-  {t:50,   type:'pink', text:'  tool_use 完全対応  コマンド自動実行'},
-  {t:53.5, type:'pink', text:'  ファイル読み書き  コード生成  全部動く'},
-  {t:57,   type:'cmd',  text:'クラウドに送らない  秘密は俺の中'},
-  {t:60,   type:'highlight',text:'  月額ゼロ円の  フルスタックAI'},
-
-  {t:63,   type:'hr',   text:'─── VERSE 2: THE PROXY ───'},
-  {t:64,   type:'lyric',text:'Claude Codeが喋る  Anthropicプロトコル'},
-  {t:67.5, type:'lyric',text:'MLXが返す  OpenAI形式'},
-  {t:71,   type:'run',  text:'$ cargo build --release  # proxy-rs/'},
-  {t:73,   type:'lyric',text:'Rustで書き直した  axumの変換プロキシ'},
-  {t:76.5, type:'warn', text:'  Python: 584ms → Rust: 262ms'},
-  {t:79,   type:'highlight',text:'  レイテンシ55%削減  メモリ1/60'},
-  {t:82,   type:'lyric',text:'tool_use変換  image自動ルーティング'},
-  {t:85.5, type:'lyric',text:'ゼロコピーストリーミング  爆速で中継'},
-
-  {t:88,   type:'hr',   text:'─── VERSE 3: MULTI-MODEL ───'},
-  {t:89,   type:'lyric',text:'Sonnet送れば122B  Haikuなら35B'},
-  {t:92.5, type:'lyric',text:'画像が混ざれば  VLに自動で飛ぶ'},
-  {t:96,   type:'run',  text:'$ ~/ai.sh img "cyberpunk Tokyo at night"'},
-  {t:98,   type:'green',text:'  ● 1024x1024  17秒で生成完了'},
-  {t:101,  type:'lyric',text:'FLUX.1-schnell  4bitで軽い'},
-  {t:104,  type:'run',  text:'$ ~/ai.sh vid "samurai on a cliff, sunset"'},
-  {t:106.5,type:'green',text:'  ● 480x832  17frames  10分で完成'},
-  {t:109,  type:'lyric',text:'Wan 2.1が描く  映画みたいな世界'},
-
-  {t:112,  type:'hr',   text:'─── CHORUS 2 ───'},
-  {t:113,  type:'cmd',  text:'全部載る  128ギガの統一メモリ'},
-  {t:116.5,type:'cmd',  text:'122B + 35B + VL-8B  合計73ギガ'},
-  {t:120,  type:'pink', text:'  まだ55ギガ空いてる  画像も動画もいける'},
-  {t:123.5,type:'highlight',text:'  Apple Silicon  Neural Accelerator'},
-  {t:127,  type:'cmd',  text:'M4の3.8倍速  M5の本気'},
-  {t:130,  type:'highlight',text:'  月額ゼロ  プライバシー完璧  速度は爆速'},
-
-  {t:133,  type:'hr',   text:'─── BRIDGE: MENU BAR ───'},
-  {t:134,  type:'run',  text:'$ ~/ai.sh menubar'},
-  {t:136,  type:'green',text:'  ● メニューバーに常駐  Start/Stop/Health'},
-  {t:139,  type:'lyric',text:'画面の右上に  脳みそのアイコン'},
-  {t:142,  type:'lyric',text:'ワンクリックで起動  ワンクリックで停止'},
-  {t:145,  type:'run',  text:'$ ~/ai.sh health'},
-  {t:147,  type:'green',text:'  ● All healthy  落ちたら自動で復活'},
-
-  {t:150,  type:'hr',   text:'─── OUTRO ───'},
-  {t:151,  type:'lyric',text:'2年後には256ギガ  400Bモデルが載る'},
-  {t:155,  type:'lyric',text:'ローカルAIの時代は  もう始まってる'},
-  {t:158,  type:'run',  text:'$ git clone github.com/yukihamada/local-claude'},
-  {t:161,  type:'cmd',  text:'bash setup.sh  それだけでいい'},
-  {t:165,  type:'highlight',text:'  全部ローカル  全部無料  全部お前のマシンで'},
-  {t:168,  type:'sys',  text:''},
-  {t:169,  type:'green',text:'  ╦  ╔═╗╔═╗╔═╗╦    ╔═╗╦'},
-  {t:169.5,type:'green',text:'  ║  ║ ║║  ╠═╣║    ╠═╣║'},
-  {t:170,  type:'green',text:'  ╩═╝╚═╝╚═╝╩ ╩╩═╝  ╩ ╩╩'},
-  {t:171,  type:'highlight',text:'  github.com/yukihamada/local-claude'},
-  {t:173,  type:'sys',  text:'  ★ Star this repo if you believe in local AI'},
-];
-
-const CTX = [
-  {t:2,  text:'# Homebrew, Python 3.11, MLX-LM, aiohttp を自動インストール', cls:'dim'},
-  {t:8,  text:'# Qwen3.5-122B-A10B-4bit (MoE, active 10B) をダウンロード', cls:'dim'},
-  {t:22, text:'# Apple M5 Max · 18 cores · 40 GPU cores · Metal 4', cls:'dim'},
-  {t:29, text:'# MLX = Apple Silicon ネイティブ ML フレームワーク', cls:'dim'},
-  {t:65, text:'# Anthropic /v1/messages ↔ OpenAI /v1/chat/completions', cls:'dim'},
-  {t:72, text:'# axum 0.8 + reqwest + tokio + serde_json', cls:'dim'},
-  {t:90, text:'# MODEL_ROUTES で自動振り分け、画像検出で VLM へ', cls:'dim'},
-  {t:97, text:'# mflux (FLUX.1-schnell 4bit) — MLX ネイティブ画像生成', cls:'dim'},
-  {t:105,text:'# Wan 2.1 1.3B (MPS/Apple GPU) — 使用後メモリ自動解放', cls:'dim'},
-  {t:135,text:'# rumps (Python) macOS メニューバー常駐アプリ', cls:'dim'},
-  {t:159,text:'# ワンコマンドセットアップ — 全自動で環境構築', cls:'dim'},
-];
-
-// ── Visualizer bars ──
-const vizC = document.getElementById('viz');
-const vizBars = [];
-for(let i=0;i<64;i++){
-  const b=document.createElement('div');
-  b.className='vb';
-  b.style.height='1px';
-  vizC.appendChild(b);
-  vizBars.push(b);
+function fmt(s) {
+  return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 }
 
-// ── State ──
-let curLine=-1, curCtx=-1;
-const out=document.getElementById('output');
-
-function addLine(line){
-  const div=document.createElement('div');
-  let prefix='', cls='';
-  switch(line.type){
-    case 'sys':   prefix='  '; cls='dim'; break;
-    case 'cmd':   prefix='❯ '; cls='cmd bold'; break;
-    case 'run':   prefix=''; cls='green'; break;
-    case 'lyric': prefix='♪ '; cls='cmd'; break;
-    case 'high':
-    case 'highlight': prefix=''; cls='highlight bold'; break;
-    case 'warn':  prefix='  ⚠ '; cls='warn'; break;
-    case 'err':   prefix='  ✗ '; cls='err bold'; break;
-    case 'hr':    div.className='dim';div.textContent=line.text;out.appendChild(div);scrollTerm();return;
-    case 'green': prefix=''; cls='green'; break;
-    case 'pink':  prefix=''; cls='pink'; break;
-    case 'purple':prefix=''; cls='purple'; break;
+function addLine(line, instant) {
+  const div = document.createElement('div');
+  let prefix = '', cls = '';
+  switch(line.type) {
+    case 'big':     div.className='big'; div.textContent=line.text; out.appendChild(div); scroll(); return;
+    case 'cmd':     prefix=''; cls='cmd'; break;
+    case 'out':     prefix=''; cls='out'; break;
+    case 'comment': prefix=''; cls='comment'; break;
+    case 'green':   prefix=''; cls='green'; break;
+    case 'cyan':    prefix=''; cls='cyan'; break;
+    case 'yellow':  prefix=''; cls='yellow'; break;
+    case 'red':     prefix=''; cls='red'; break;
+    case 'pink':    prefix=''; cls='pink'; break;
+    case 'purple':  prefix=''; cls='purple'; break;
+    case 'dim':     prefix=''; cls='dim'; break;
+    default:        prefix=''; cls='out';
   }
-  div.className=cls;
-  if(['cmd','lyric','highlight','pink','warn','err'].includes(line.type)){
-    div.textContent=prefix;
+  div.className = cls;
+
+  if (!instant && ['cmd','green','cyan','yellow'].includes(line.type)) {
+    // Typing effect
+    div.textContent = '';
     div.classList.add('typing');
     out.appendChild(div);
-    scrollTerm();
-    const txt=line.text;
-    let i=0;
-    const speed=Math.max(15, Math.min(50, 2000/txt.length));
-    function typeChar(){
-      if(i<txt.length){
-        div.textContent=prefix+txt.substring(0,i+1);
+    scroll();
+    const txt = line.text;
+    let i = 0;
+    const speed = Math.max(12, Math.min(40, 1500 / txt.length));
+    function typeChar() {
+      if (i < txt.length) {
+        div.textContent = txt.substring(0, i + 1);
         i++;
-        scrollTerm();
+        scroll();
         setTimeout(typeChar, speed);
       } else {
         div.classList.remove('typing');
@@ -316,92 +404,86 @@ function addLine(line){
     }
     typeChar();
   } else {
-    div.textContent=prefix+line.text;
+    div.textContent = line.text;
     out.appendChild(div);
-    scrollTerm();
+    scroll();
   }
 }
 
-function addCtx(line){
-  const div=document.createElement('div');
-  div.className=line.cls||'dim';
-  div.style.fontSize='11px';
-  div.style.opacity='.45';
-  div.textContent=line.text;
-  out.appendChild(div);
-  scrollTerm();
+function scroll() {
+  const term = document.getElementById('term');
+  while (out.children.length > 50) out.removeChild(out.firstChild);
+  term.scrollTop = term.scrollHeight;
 }
 
-function scrollTerm(){
-  const term=document.getElementById('term');
-  while(out.children.length>45){out.removeChild(out.firstChild);}
-  term.scrollTop=term.scrollHeight;
-}
-
-function fmt(s){return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;}
-
-function loop(){
+function loop() {
+  if (!playing) return;
   requestAnimationFrame(loop);
-  const ct=audio.currentTime;
-  const dur=audio.duration||180;
 
-  document.getElementById('seek').value=ct;
-  document.getElementById('seek').max=dur;
-  document.getElementById('t-cur').textContent=fmt(ct);
-  document.getElementById('t-dur').textContent=fmt(dur);
+  currentTime = performance.now() / 1000 - startTime;
+  if (currentTime > DURATION) { cmdStop(); return; }
 
-  let sec='--';
-  if(ct<20) sec='INTRO';
-  else if(ct<43) sec='VERSE 1';
-  else if(ct<63) sec='CHORUS';
-  else if(ct<88) sec='VERSE 2';
-  else if(ct<112) sec='VERSE 3';
-  else if(ct<133) sec='CHORUS 2';
-  else if(ct<150) sec='BRIDGE';
-  else sec='OUTRO';
-  document.getElementById('s-section').textContent=sec;
+  // Progress
+  const pct = (currentTime / DURATION) * 100;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('timeLabel').textContent = fmt(currentTime) + ' / ' + fmt(DURATION);
 
-  // Speed display
-  if(ct>30 && ct<40) document.getElementById('s-speed').textContent='60 tok/s ⚡';
-  else if(ct>88 && ct<95) document.getElementById('s-speed').textContent='116 tok/s ⚡⚡';
-  else document.getElementById('s-speed').textContent='60 tok/s';
+  // Section
+  let sec = '--';
+  if (currentTime < 37) sec = 'INSTALL';
+  else if (currentTime < 57) sec = 'START';
+  else if (currentTime < 79) sec = 'CLAUDE CODE';
+  else if (currentTime < 90) sec = 'CODE GEN';
+  else if (currentTime < 101) sec = 'IMAGE GEN';
+  else if (currentTime < 112) sec = 'VIDEO GEN';
+  else if (currentTime < 120) sec = 'MENUBAR';
+  else if (currentTime < 132) sec = 'SWITCH';
+  else if (currentTime < 143) sec = 'BENCHMARK';
+  else sec = 'SUMMARY';
+  document.getElementById('sectionLabel').textContent = sec;
 
-  for(let i=curLine+1;i<L.length;i++){
-    if(ct>=L[i].t){addLine(L[i]);curLine=i;}
-    else break;
-  }
-  for(let i=curCtx+1;i<CTX.length;i++){
-    if(ct>=CTX[i].t){addCtx(CTX[i]);curCtx=i;}
-    else break;
-  }
-
-  // Fake visualizer (synced to beat)
-  const beat = (ct * 2) % 1;
-  for(let i=0;i<64;i++){
-    const v = Math.sin(i*0.3 + ct*4) * 0.5 + 0.5;
-    const pulse = beat < 0.1 ? 1 : 0.3;
-    const h = Math.max(1, v * pulse * 28);
-    vizBars[i].style.height = h+'px';
-    vizBars[i].style.background = v>.7?'var(--cyan)':v>.4?'var(--green)':'var(--dim)';
-  }
-
-  // Logo pulse
-  const logo = document.getElementById('logo');
-  if(beat < 0.1) {
-    logo.style.opacity = '0.5';
-    logo.style.transform = 'translateX(-50%) scale(1.02)';
-  } else {
-    logo.style.opacity = '0.25';
-    logo.style.transform = 'translateX(-50%) scale(1)';
+  // Lines
+  for (let i = curLine + 1; i < LINES.length; i++) {
+    if (currentTime >= LINES[i].t) {
+      if (LINES[i].type) addLine(LINES[i], false);
+      if (LINES[i].sub) {
+        subEl.textContent = LINES[i].sub;
+        subEl.style.opacity = '1';
+      }
+      curLine = i;
+    } else break;
   }
 }
 
-function go(){
-  document.getElementById('start').style.opacity='0';
-  setTimeout(()=>document.getElementById('start').style.display='none',400);
-  createSynth();
-  audio.play();
-  requestAnimationFrame(loop);
+// ── Simple beat (Web Audio) ──
+let beatCtx;
+function startBeat() {
+  try {
+    beatCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function tick() {
+      if (!playing) { setTimeout(tick, 500); return; }
+      // Kick
+      const o = beatCtx.createOscillator();
+      const g = beatCtx.createGain();
+      o.type = 'sine'; o.frequency.value = 55;
+      g.gain.setValueAtTime(0.15, beatCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, beatCtx.currentTime + 0.12);
+      o.connect(g); g.connect(beatCtx.destination);
+      o.start(beatCtx.currentTime); o.stop(beatCtx.currentTime + 0.12);
+      // Hi-hat
+      if (Math.random() > 0.4) {
+        const h = beatCtx.createOscillator();
+        const hg = beatCtx.createGain();
+        h.type = 'square'; h.frequency.value = 6000 + Math.random() * 3000;
+        hg.gain.setValueAtTime(0.02, beatCtx.currentTime);
+        hg.gain.exponentialRampToValueAtTime(0.001, beatCtx.currentTime + 0.04);
+        h.connect(hg); hg.connect(beatCtx.destination);
+        h.start(beatCtx.currentTime); h.stop(beatCtx.currentTime + 0.04);
+      }
+      setTimeout(tick, 500);
+    }
+    tick();
+  } catch(e) {}
 }
 </script>
 </body>
