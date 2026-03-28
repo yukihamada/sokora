@@ -1,7 +1,22 @@
 """Anthropic Messages API -> OpenAI Chat Completions proxy for MLX
-Supports: text, streaming, tool_use/tool_result, multi-model routing"""
+Supports: text, streaming, tool_use/tool_result, multi-model routing
+Performance: uvloop, connection pooling, persistent sessions"""
 import json, uuid, time, os
-from aiohttp import web, ClientSession
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass
+from aiohttp import web, ClientSession, TCPConnector
+
+# Persistent session with connection pooling (reuse TCP connections to MLX)
+_session = None
+async def get_session():
+    global _session
+    if _session is None or _session.closed:
+        connector = TCPConnector(limit=20, keepalive_timeout=300, enable_cleanup_closed=True)
+        _session = ClientSession(connector=connector)
+    return _session
 
 # ── Multi-model configuration ──
 # Each MLX server runs on its own port. The proxy routes based on the
@@ -255,9 +270,9 @@ async def handle_messages(request):
         return await handle_stream(request, oai_body, model, mlx_url)
 
     # Non-streaming
-    async with ClientSession() as session:
-        async with session.post(mlx_url, json=oai_body) as resp:
-            data = await resp.json()
+    session = await get_session()
+    async with session.post(mlx_url, json=oai_body) as resp:
+        data = await resp.json()
 
     return web.json_response(oai_response_to_anthropic(data, model))
 
@@ -290,8 +305,8 @@ async def handle_stream(request, oai_body, model, mlx_url):
     text_block_started = False
     tool_blocks_started = {}  # index -> bool
 
-    async with ClientSession() as session:
-        async with session.post(mlx_url, json=oai_body) as resp:
+    session = await get_session()
+    async with session.post(mlx_url, json=oai_body) as resp:
             async for line in resp.content:
                 line = line.decode().strip()
                 if not line.startswith("data: "):
@@ -414,7 +429,13 @@ async def catch_all(request):
     log(f"CATCH-ALL {request.method} {request.path} body={body[:300]}")
     return web.json_response({"ok": True})
 
+async def on_cleanup(app):
+    global _session
+    if _session and not _session.closed:
+        await _session.close()
+
 app = web.Application()
+app.on_cleanup.append(on_cleanup)
 app.router.add_post("/v1/messages/count_tokens", handle_count_tokens)
 app.router.add_post("/v1/messages", handle_messages)
 app.router.add_get("/v1/models", handle_models)
