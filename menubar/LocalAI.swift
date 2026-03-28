@@ -83,6 +83,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // === Remote Access ===
+        let remoteHeader = NSMenuItem(title: "Remote Access", action: nil, keyEquivalent: "")
+        remoteHeader.isEnabled = false
+        menu.addItem(remoteHeader)
+
+        menu.addItem(NSMenuItem(title: "  Start Tunnel (anywhere)", action: #selector(startTunnel), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "  Stop Tunnel", action: #selector(stopTunnel), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "  Copy Remote URL", action: #selector(copyRemoteURL), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "  Copy LAN URL", action: #selector(copyURL), keyEquivalent: ""))
+
+        menu.addItem(NSMenuItem.separator())
+
         // === Tools ===
         let toolsHeader = NSMenuItem(title: "Tools", action: nil, keyEquivalent: "")
         toolsHeader.isEnabled = false
@@ -91,7 +103,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "  Benchmark", action: #selector(runBench), keyEquivalent: "b"))
         menu.addItem(NSMenuItem(title: "  Open Logs", action: #selector(openLogs), keyEquivalent: "l"))
         menu.addItem(NSMenuItem(title: "  Open Generated Images", action: #selector(openGenerated), keyEquivalent: "g"))
-        menu.addItem(NSMenuItem(title: "  Copy API URL", action: #selector(copyURL), keyEquivalent: ""))
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "  GitHub: yukihamada/local-claude", action: #selector(openGitHub), keyEquivalent: ""))
@@ -320,6 +331,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "claude\n\n" +
             "Or use SSH tunnel for extra security:\n" +
             "ssh -L 4001:127.0.0.1:4001 \(NSUserName())@\(ip)")
+    }
+
+    @objc func startTunnel() {
+        DispatchQueue.global().async { [weak self] in
+            let p = Process()
+            let pipe = Pipe()
+            p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            p.arguments = ["-c", "export PATH=/opt/homebrew/bin:$PATH && pkill -f cloudflared 2>/dev/null; sleep 1 && nohup cloudflared tunnel --url http://127.0.0.1:4001 > ~/cloudflared.log 2>&1 &"]
+            p.standardOutput = pipe
+            try? p.run()
+            p.waitUntilExit()
+            sleep(5)
+            // Read URL from log
+            if let log = try? String(contentsOfFile: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("cloudflared.log").path, encoding: .utf8),
+               let range = log.range(of: "https://[a-z0-9-]+\\.trycloudflare\\.com", options: .regularExpression) {
+                let url = String(log[range])
+                self?.showAlert("Tunnel Active!", "URL: \(url)\n\nAnyone with this URL + your API key can access your AI from anywhere.\n\nUse 'Copy Remote URL' to copy connection details.")
+            } else {
+                self?.showAlert("Tunnel", "Starting... check 'Copy Remote URL' in a few seconds.")
+            }
+        }
+    }
+
+    @objc func stopTunnel() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        p.arguments = ["-f", "cloudflared"]
+        try? p.run()
+        p.waitUntilExit()
+        showAlert("Tunnel Stopped", "Remote access disabled.")
+    }
+
+    @objc func copyRemoteURL() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let key = (try? String(contentsOf: home.appendingPathComponent(".local-ai-key"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let log = (try? String(contentsOfFile: home.appendingPathComponent("cloudflared.log").path, encoding: .utf8)) ?? ""
+
+        if let range = log.range(of: "https://[a-z0-9-]+\\.trycloudflare\\.com", options: .regularExpression) {
+            let url = String(log[range])
+            let info = "export ANTHROPIC_BASE_URL=\(url)\nexport ANTHROPIC_API_KEY=\(key)\nclaude"
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(info, forType: .string)
+            showAlert("Copied!", "Paste on any machine:\n\n\(info)")
+        } else {
+            showAlert("No Tunnel", "Start a tunnel first with 'Start Tunnel'.")
+        }
     }
 
     @objc func openGitHub() {
