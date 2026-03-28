@@ -105,9 +105,10 @@ def convert_messages(messages, system=""):
             oai.append({"role": role, "content": content})
             continue
 
-        # Array content — need to split into text, tool_use, tool_result
+        # Array content — need to split into text, tool_use, tool_result, image
         if isinstance(content, list):
             text_parts = []
+            image_parts = []
             tool_calls = []
             tool_results = []
 
@@ -115,6 +116,16 @@ def convert_messages(messages, system=""):
                 btype = block.get("type", "")
                 if btype == "text":
                     text_parts.append(block.get("text", ""))
+                elif btype == "image":
+                    # Anthropic image block: {"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"..."}}
+                    src = block.get("source", {})
+                    if src.get("type") == "base64":
+                        data_url = f"data:{src.get('media_type','image/jpeg')};base64,{src['data']}"
+                        image_parts.append({"type": "image_url", "image_url": {"url": data_url}})
+                    elif src.get("type") == "url":
+                        image_parts.append({"type": "image_url", "image_url": {"url": src["url"]}})
+                elif btype == "image_url":
+                    image_parts.append(block)
                 elif btype == "tool_use":
                     tool_calls.append({
                         "id": block["id"],
@@ -150,8 +161,14 @@ def convert_messages(messages, system=""):
                     m["tool_calls"] = tool_calls
                 oai.append(m)
             elif role == "user":
-                # User messages may contain text + tool_results
-                if text_parts:
+                # User messages may contain text + images + tool_results
+                if image_parts:
+                    # Multi-modal: build OpenAI content array with images + text
+                    multi_content = list(image_parts)
+                    if text_parts:
+                        multi_content.append({"type": "text", "text": "\n".join(text_parts)})
+                    oai.append({"role": "user", "content": multi_content})
+                elif text_parts:
                     oai.append({"role": "user", "content": "\n".join(text_parts)})
                 for tr in tool_results:
                     oai.append(tr)
