@@ -22,9 +22,27 @@ Claude Code は本家 Anthropic API と同じプロトコルで通信。プロ�
 
 ## 必要なもの
 
-- Apple Silicon Mac（M1/M2/M3/M4/M5）64GB以上（128GB推奨）
+- Apple Silicon Mac（M1/M2/M3/M4/M5）**16GB以上**
 - macOS 14+
-- ディスク空き ~40GB（モデルデータ）
+- ディスク空き 5〜40GB（モデルサイズによる）
+
+## RAM別 自動モデル選択
+
+`setup.sh` がRAMを自動検出して最適なモデルを選ぶ。手動設定不要。
+
+| RAM | メイン | 高速 | ビジョン | ディスク |
+|-----|-------|------|---------|---------|
+| **16GB** | Qwen3.5-4B | — | — | ~3GB |
+| **24GB** | Qwen3.5-9B | — | VL-4B | ~7GB |
+| **32GB** | Qwen3.5-35B-A3B | — | VL-4B | ~10GB |
+| **64GB** | Qwen3.5-35B-A3B | 9B | VL-8B | ~15GB |
+| **96GB** | Qwen3.5-122B-A10B | — | VL-8B | ~45GB |
+| **128GB** | Qwen3.5-122B-A10B | 35B-A3B | VL-8B | ~55GB |
+
+16GB未満はエラーで停止する。環境変数で上書きも可能：
+```bash
+MLX_MODEL_MAIN="mlx-community/Qwen3-8B-4bit" bash setup.sh
+```
 
 ## セットアップ（1コマンド）
 

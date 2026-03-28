@@ -19,14 +19,66 @@
 
 set -e
 
-MODEL="mlx-community/Qwen3.5-122B-A10B-4bit"
 MLX_PORT=5000
 PROXY_PORT=4001
 VENV="$HOME/mlx_env"
 
+# ── Auto-detect RAM and select optimal models ──
+RAM_BYTES=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
+RAM_GB=$((RAM_BYTES / 1073741824))
+
+if [ "$RAM_GB" -lt 16 ]; then
+  echo "ERROR: At least 16GB RAM required. You have ${RAM_GB}GB."
+  echo "LOCAL AI needs Apple Silicon Mac with 16GB+ unified memory."
+  exit 1
+elif [ "$RAM_GB" -le 18 ]; then
+  # 16GB: smallest model only
+  MODEL_MAIN="mlx-community/Qwen3.5-4B-4bit"
+  MODEL_FAST=""
+  MODEL_VISION=""
+  TIER="16GB (Minimal)"
+elif [ "$RAM_GB" -le 24 ]; then
+  # 24GB: 9B main
+  MODEL_MAIN="mlx-community/Qwen3.5-9B-4bit"
+  MODEL_FAST=""
+  MODEL_VISION="mlx-community/Qwen3-VL-4B-Instruct-4bit"
+  TIER="24GB (Standard)"
+elif [ "$RAM_GB" -le 36 ]; then
+  # 32GB: 35B MoE (active 3B, very fast)
+  MODEL_MAIN="mlx-community/Qwen3.5-35B-A3B-4bit"
+  MODEL_FAST=""
+  MODEL_VISION="mlx-community/Qwen3-VL-4B-Instruct-4bit"
+  TIER="32GB (Pro)"
+elif [ "$RAM_GB" -le 64 ]; then
+  # 48-64GB: 35B main + 9B fast
+  MODEL_MAIN="mlx-community/Qwen3.5-35B-A3B-4bit"
+  MODEL_FAST="mlx-community/Qwen3.5-9B-4bit"
+  MODEL_VISION="mlx-community/Qwen3-VL-8B-Instruct-4bit"
+  TIER="64GB (Advanced)"
+elif [ "$RAM_GB" -le 96 ]; then
+  # 96GB: 122B main + 35B fast
+  MODEL_MAIN="mlx-community/Qwen3.5-122B-A10B-4bit"
+  MODEL_FAST=""
+  MODEL_VISION="mlx-community/Qwen3-VL-8B-Instruct-4bit"
+  TIER="96GB (Expert)"
+else
+  # 128GB+: full fleet
+  MODEL_MAIN="mlx-community/Qwen3.5-122B-A10B-4bit"
+  MODEL_FAST="mlx-community/Qwen3.5-35B-A3B-4bit"
+  MODEL_VISION="mlx-community/Qwen3-VL-8B-Instruct-4bit"
+  TIER="128GB (Ultimate)"
+fi
+
+# Allow override
+MODEL_MAIN="${MLX_MODEL_MAIN:-$MODEL_MAIN}"
+MODEL_FAST="${MLX_MODEL_FAST:-$MODEL_FAST}"
+
 echo "========================================"
 echo " Local Claude Code Setup"
-echo " Model: $MODEL"
+echo " RAM: ${RAM_GB}GB — Tier: $TIER"
+echo " Main:   $MODEL_MAIN"
+[ -n "$MODEL_FAST" ] && echo " Fast:   $MODEL_FAST"
+[ -n "$MODEL_VISION" ] && echo " Vision: $MODEL_VISION"
 echo "========================================"
 
 # -------------------------------------------------------
@@ -61,17 +113,20 @@ echo "  mlx-lm $(pip show mlx-lm 2>/dev/null | grep Version | cut -d' ' -f2)"
 # -------------------------------------------------------
 # 3. Download model (if not cached)
 # -------------------------------------------------------
-echo "[3/6] Checking model cache..."
-if python3 -c "
+echo "[3/6] Downloading models..."
+for m in $MODEL_MAIN $MODEL_FAST $MODEL_VISION; do
+  [ -z "$m" ] && continue
+  if python3 -c "
 from huggingface_hub import scan_cache_dir
 repos = [i.repo_id for i in scan_cache_dir().repos]
-exit(0 if '$MODEL' in repos else 1)
+exit(0 if '$m' in repos else 1)
 " 2>/dev/null; then
-  echo "  Model already cached"
-else
-  echo "  Downloading $MODEL (this may take a while)..."
-  python3 -c "from huggingface_hub import snapshot_download; snapshot_download('$MODEL')"
-fi
+    echo "  $m — cached"
+  else
+    echo "  $m — downloading..."
+    python3 -c "from huggingface_hub import snapshot_download; snapshot_download('$m')"
+  fi
+done
 
 # -------------------------------------------------------
 # 4. Anthropic proxy (with tool_use support)
@@ -97,13 +152,31 @@ VID_B64EOF
 echo "[5/6] Writing ~/ai.sh..."
 cat > "$HOME/ai.sh" << 'SHEOF'
 #!/bin/bash
-# Multi-model MLX server manager
-MODEL_MAIN="mlx-community/Qwen3.5-122B-A10B-4bit"
-MODEL_FAST="mlx-community/Qwen3.5-35B-A3B-4bit"
+# Multi-model MLX server manager — auto-detects RAM
 PORT_MAIN=5000
 PORT_FAST=5001
 PROXY_PORT=4001
 VENV=~/mlx_env/bin/activate
+PROXY_BIN=~/proxy-rs/target/release/anthropic-proxy
+
+# Auto-detect RAM tier
+RAM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+if [ "$RAM_GB" -le 18 ]; then
+  MODEL_MAIN="mlx-community/Qwen3.5-4B-4bit"; MODEL_FAST=""
+elif [ "$RAM_GB" -le 24 ]; then
+  MODEL_MAIN="mlx-community/Qwen3.5-9B-4bit"; MODEL_FAST=""
+elif [ "$RAM_GB" -le 36 ]; then
+  MODEL_MAIN="mlx-community/Qwen3.5-35B-A3B-4bit"; MODEL_FAST=""
+elif [ "$RAM_GB" -le 64 ]; then
+  MODEL_MAIN="mlx-community/Qwen3.5-35B-A3B-4bit"; MODEL_FAST="mlx-community/Qwen3.5-9B-4bit"
+elif [ "$RAM_GB" -le 96 ]; then
+  MODEL_MAIN="mlx-community/Qwen3.5-122B-A10B-4bit"; MODEL_FAST=""
+else
+  MODEL_MAIN="mlx-community/Qwen3.5-122B-A10B-4bit"; MODEL_FAST="mlx-community/Qwen3.5-35B-A3B-4bit"
+fi
+# Allow env override
+MODEL_MAIN="${MLX_MODEL_MAIN:-$MODEL_MAIN}"
+MODEL_FAST="${MLX_MODEL_FAST:-$MODEL_FAST}"
 
 start_model() {
   local model=$1 port=$2 label=$3 logfile=$4
