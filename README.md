@@ -73,6 +73,8 @@ clc
 | `clc` | 本家 Anthropic で Claude Code |
 | `ai-local` | ローカルに切替（起動しない） |
 | `ai-cloud` | クラウドに切替（起動しない） |
+| `~/ai.sh img "プロンプト"` | FLUX.1で画像生成 |
+| `~/ai.sh img "プロンプト" file.png 1024` | ファイル名・サイズ指定 |
 
 ## アーキテクチャ
 
@@ -108,7 +110,21 @@ Anthropic Messages API と OpenAI Chat Completions API を相互変換する軽�
 
 128GB Mac なら全モデル同時に載る（合計 ~73GB）。64GB の場合は main + vision のみ推奨。
 
-画像対応はメッセージに画像が含まれていると自動でVLMにルーティングされる。base64・URL両対応。
+画像理解はメッセージに画像が含まれていると自動でVLMにルーティング。base64・URL両対応。
+
+### 画像生成 (FLUX.1-schnell)
+
+```bash
+# 基本
+~/ai.sh img "a cyberpunk Tokyo street at night, neon lights, rain"
+
+# ファイル名・サイズ指定
+~/ai.sh img "Mount Fuji at sunrise with cherry blossoms" fuji.png 1024
+```
+
+- FLUX.1-schnell (4bit量子化) を使用
+- 1024x1024 が約 17秒（M5, 4ステップ）
+- 生成画像は `~/generated/` に保存
 
 ## カスタマイズ
 
