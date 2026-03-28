@@ -1,120 +1,130 @@
 # Local Claude Code with MLX
 
-Run Claude Code locally on Apple Silicon Mac using Qwen3.5-122B via MLX. Zero API costs, full tool_use support, complete offline operation.
+Apple Silicon Mac で Claude Code をローカル実行。API費用ゼロ、ツール実行対応、完全オフライン動作。
 
-## What This Does
+> Qwen3.5-122B を MLX で動かし、Anthropic API互換プロキシ経由で Claude Code がそのまま使える
+
+## 仕組み
 
 ```
-Claude Code  -->  Anthropic Proxy (:4001)  -->  MLX Server (:5000)  -->  Qwen3.5-122B
-  (tool_use)      (Anthropic -> OpenAI)         (Apple GPU)              (4-bit, ~60GB RAM)
+Claude Code  →  Anthropic Proxy (:4001)  →  MLX Server (:5000)  →  Qwen3.5-122B
+  (tool_use)     (Anthropic↔OpenAI変換)       (Apple GPU)            (4bit, ~60GB RAM)
 ```
 
-- Translates Anthropic Messages API to OpenAI format for MLX
-- Supports streaming, tool_use/tool_result, system prompts
-- Claude Code runs commands, reads/writes files, just like with the real API
-- Switch between local and cloud with one command
+Claude Code は本家 Anthropic API と同じプロトコルで通信するので、コマンド実行・ファイル読み書き・コード生成がそのまま動く。
 
-## Requirements
+## 必要なもの
 
-- Apple Silicon Mac with 64GB+ RAM (128GB recommended for 122B model)
+- Apple Silicon Mac（M1/M2/M3/M4/M5）64GB以上（128GB推奨）
 - macOS 14+
-- ~40GB disk space for model weights
+- ディスク空き ~40GB（モデルデータ）
 
-## Quick Start
+## セットアップ（1コマンド）
 
 ```bash
-# One-command setup (installs everything)
 bash setup.sh
+```
 
-# Start the AI server
+これだけで以下が全自動で入る:
+- Homebrew + Python 3.11
+- MLX-LM（Apple GPU推論エンジン）
+- Qwen3.5-122B-A10B-4bit モデル
+- Anthropic互換プロキシ
+- 起動/停止スクリプト
+- Claude Code設定（settings.json）
+- シェルエイリアス
+
+### リモートマシンにセットアップ
+
+```bash
+ssh user@mac-ip "bash -s" < setup.sh
+```
+
+## 使い方
+
+```bash
+# AIサーバー起動
 ~/ai.sh start
 
-# Launch Claude Code (local)
+# ローカルAIでClaude Code起動
 cld
 
-# Switch to Anthropic cloud
+# 本家Anthropicに切り替え
 clc
 ```
 
-## Setup from Remote
+## コマンド一覧
 
-```bash
-ssh user@your-mac "bash -s" < setup.sh
-```
+| コマンド | 説明 |
+|---------|------|
+| `~/ai.sh start` | MLX + プロキシ起動 |
+| `~/ai.sh stop` | 全停止 |
+| `~/ai.sh status` | 稼働状況を確認 |
+| `~/ai.sh test` | 推論テスト |
+| `~/ai.sh restart` | 再起動 |
+| `cld` | ローカルAIで Claude Code |
+| `clc` | 本家 Anthropic で Claude Code |
+| `ai-local` | ローカルに切替（起動しない） |
+| `ai-cloud` | クラウドに切替（起動しない） |
 
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `~/ai.sh start` | Start MLX + Anthropic proxy |
-| `~/ai.sh stop` | Stop everything |
-| `~/ai.sh status` | Check running status |
-| `~/ai.sh test` | Quick inference test |
-| `~/ai.sh restart` | Restart all services |
-| `cld` | Claude Code with local AI |
-| `clc` | Claude Code with Anthropic cloud |
-| `ai-local` | Switch to local (no launch) |
-| `ai-cloud` | Switch to cloud (no launch) |
-
-## Architecture
+## アーキテクチャ
 
 ### Anthropic Proxy (`anthropic_proxy.py`)
 
-A lightweight aiohttp server that translates between Anthropic and OpenAI API formats:
+Anthropic Messages API と OpenAI Chat Completions API を相互変換する軽量プロキシ（aiohttp）。
 
-- `POST /v1/messages` - Chat completions (streaming + non-streaming)
-- `POST /v1/messages/count_tokens` - Token counting
-- `GET /v1/models` - Model listing
+**エンドポイント:**
+- `POST /v1/messages` — チャット（ストリーミング対応）
+- `POST /v1/messages/count_tokens` — トークン数カウント
+- `GET /v1/models` — モデル一覧
 
-**Tool use conversion:**
+**tool_use 変換テーブル:**
 
-| Anthropic | OpenAI |
-|-----------|--------|
+| Anthropic 形式 | OpenAI 形式 |
+|---------------|------------|
 | `tools[].input_schema` | `tools[].function.parameters` |
 | `content[].type: "tool_use"` | `message.tool_calls[]` |
-| `content[].type: "tool_result"` | `role: "tool"` messages |
+| `content[].type: "tool_result"` | `role: "tool"` メッセージ |
 | `stop_reason: "tool_use"` | `finish_reason: "tool_calls"` |
 
 ### MLX Server
 
-Uses `mlx-lm` to serve the model with Apple GPU acceleration. The Qwen3.5-122B-A10B-4bit model uses Mixture of Experts (10B active parameters out of 122B total), making it fast on Apple Silicon while maintaining high quality.
+`mlx-lm` で Apple GPU を使ってモデルを推論。Qwen3.5-122B は MoE（Mixture of Experts）で、122B パラメータ中 ~10B だけが毎回アクティブになるため、Apple Silicon でも高速に動く。
 
-## Model
+## モデル
 
-**Qwen3.5-122B-A10B-4bit** (via mlx-community)
-- 122B total parameters, ~10B active (MoE)
-- 4-bit quantization, ~40GB on disk
-- ~60GB RAM usage at runtime
-- Supports 100+ languages, strong at code generation
-- Native function/tool calling support
+**Qwen3.5-122B-A10B-4bit**（mlx-community）
+- 122B パラメータ（MoE、アクティブ ~10B）
+- 4bit量子化、ディスク ~40GB、RAM ~60GB
+- 100以上の言語に対応、コード生成に強い
+- ツール呼び出し（function calling）ネイティブ対応
 
-## Customization
+## カスタマイズ
 
-### Using a different model
+### 別のモデルを使う
 
-Edit `MODEL` in `setup.sh` and `anthropic_proxy.py`:
+`setup.sh` と `anthropic_proxy.py` の `MODEL` を変更:
 
 ```bash
-# Smaller model (32GB+ RAM)
+# 小さめ（32GB+ RAM）
 MODEL="mlx-community/Qwen3-32B-4bit"
 
-# Even smaller (16GB+ RAM)
+# さらに小さめ（16GB+ RAM）
 MODEL="mlx-community/Qwen3-8B-4bit"
 ```
 
-### Changing ports
+### ポート変更
 
-Edit `MLX_PORT` and `PROXY_PORT` in `~/ai.sh`.
+`~/ai.sh` の `MLX_PORT` と `PROXY_PORT` を編集。
 
-## Troubleshooting
+## トラブルシューティング
 
-**"ECONNREFUSED"** - Server not running. Run `~/ai.sh start`.
-
-**"MLX timeout"** - Model still loading. Check `tail -f ~/mlx_server.log`.
-
-**Tool calls not executing** - Make sure you're using `--dangerously-skip-permissions` flag.
-
-**Out of memory** - The 122B model needs ~60GB RAM. Try a smaller model.
+| エラー | 対処 |
+|-------|------|
+| ECONNREFUSED | サーバー未起動。`~/ai.sh start` を実行 |
+| MLX timeout | モデルロード中。`tail -f ~/mlx_server.log` で確認 |
+| ツールが実行されない | `--dangerously-skip-permissions` フラグを確認 |
+| メモリ不足 | 122Bモデルは ~60GB必要。小さいモデルに変更 |
 
 ## License
 
