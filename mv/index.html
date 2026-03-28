@@ -83,7 +83,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
 <div class="desc">
   <s>Claude API $100+/mo</s> → <b>$0</b><br>
   <s>Ollama 30 tok/s</s> → <b>60 tok/s (2x faster)</b><br>
-  <s>Code sent to cloud</s> → <b>Fully local</b>
+  <s>Code sent to cloud</s> → <b>Fully local</b><br>
+  <b>16GB M2 Air → 128GB M5 Max</b> all supported
 </div>
 <div class="play">[ ▶ TAP TO PLAY ]</div>
 </div>
@@ -102,7 +103,11 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
   <div class="install-box">
     <div class="step">$ git clone https://github.com/yukihamada/local-claude</div>
     <div class="step">$ cd local-claude && bash setup.sh</div>
-    <div class="url">Requirements: Mac (M1+) with 64GB+ RAM</div>
+    <div class="url">Auto-detects RAM. Works on 16GB M2 Air to 128GB M5 Max.</div>
+  </div>
+  <div class="install-box" style="font-size:11px;margin-top:8px;">
+    <div style="color:var(--cyan);margin-bottom:4px;">RAM Auto-Detection:</div>
+    <div style="color:var(--dim);">16GB → 4B  ·  24GB → 9B  ·  32GB → 35B  ·  64GB → 35B+9B  ·  96GB → 122B  ·  128GB → 122B+35B+VL</div>
   </div>
   <div class="btn-row">
     <a class="btn-big" href="https://github.com/yukihamada/local-claude" target="_blank">★ View on GitHub</a>
@@ -188,7 +193,11 @@ const LINES=[
 {t:24.5, type:'out',  text:'  [2/6] MLX-LM ...'},
 {t:25,   type:'green',text:'    installed'},
 {t:25.5, type:'out',  text:'  [3/6] Qwen3.5-122B ████████████ 100%'},
-{t:26.5, type:'green',text:'  Setup complete!'},
+{t:23.5, type:'out',  text:'  Detecting RAM...'},
+{t:24,   type:'green',text:'  128GB detected → Tier: Ultimate'},
+{t:24.5, type:'dim',  text:'    16GB→4B  24GB→9B  32GB→35B  64GB→35B+9B  128GB→122B+35B'},
+{t:24.5, sub:'Auto-detects your RAM. Works on any Mac 16GB+'},
+{t:25.5, type:'green',text:'  Setup complete!'},
 {t:22.8, sub:'Done in five minutes'},
 
 // 0:27 Start

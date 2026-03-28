@@ -2,7 +2,9 @@
 
 Apple Silicon Mac で Claude Code をローカル実行。API費用ゼロ、ツール実行対応、完全オフライン動作。
 
-> Qwen3.5-122B を MLX で動かし、Anthropic API互換プロキシ経由で Claude Code がそのまま使える
+> **16GB の M2 Air から 128GB の M5 Max まで、全Mac対応。** RAMを自動検出して最適なモデルを選択。`bash setup.sh` だけ。
+
+**MV**: [英語版](mv/index.html) / [日本語版](mv/ja.html)
 
 ## 仕組み
 
