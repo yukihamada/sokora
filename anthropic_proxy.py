@@ -23,6 +23,11 @@ MODELS = {
         "port": int(os.environ.get("MLX_PORT_FAST", "5001")),
         "label": "Qwen3.5-35B-A3B (fast)",
     },
+    "vision": {
+        "mlx_model": os.environ.get("MLX_MODEL_VISION", "mlx-community/Qwen3-VL-8B-Instruct-4bit"),
+        "port": int(os.environ.get("MLX_PORT_VISION", "5002")),
+        "label": "Qwen3-VL-8B (vision)",
+    },
 }
 
 # Map Anthropic model names -> which backend to use
@@ -41,8 +46,23 @@ MODEL_ROUTES = {
 
 DEFAULT_BACKEND = "main"
 
-def get_backend(anthropic_model):
-    """Resolve Anthropic model name to MLX backend config"""
+def has_images(messages):
+    """Check if any message contains image content"""
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            for block in content:
+                if block.get("type") in ("image", "image_url"):
+                    return True
+                if block.get("type") == "source" and block.get("media_type", "").startswith("image/"):
+                    return True
+    return False
+
+def get_backend(anthropic_model, messages=None):
+    """Resolve Anthropic model name to MLX backend config.
+    Auto-routes to vision backend if images are detected."""
+    if messages and has_images(messages):
+        return MODELS.get("vision", MODELS["main"])
     key = MODEL_ROUTES.get(anthropic_model, DEFAULT_BACKEND)
     backend = MODELS.get(key, MODELS["main"])
     return backend
@@ -199,7 +219,7 @@ async def handle_messages(request):
     model = body.get("model", "claude-sonnet-4-6")
     stream = body.get("stream", False)
     tools = body.get("tools", None)
-    backend = get_backend(model)
+    backend = get_backend(model, body.get("messages", []))
     mlx_url = f"http://127.0.0.1:{backend['port']}/v1/chat/completions"
     log(f"POST /v1/messages model={model} -> {backend['label']} :{backend['port']} stream={stream} tools={len(tools) if tools else 0}")
 

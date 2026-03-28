@@ -8,17 +8,17 @@ Apple Silicon Mac で Claude Code をローカル実行。API費用ゼロ、ツ�
 
 ```
                                           ┌─ MLX :5000 → Qwen3.5-122B (Sonnet/Opus)
-Claude Code  →  Anthropic Proxy (:4001) ──┤
-  (tool_use)     (自動モデル振り分け)       └─ MLX :5001 → Qwen3.5-35B  (Haiku/高速)
+Claude Code  →  Anthropic Proxy (:4001) ──┼─ MLX :5001 → Qwen3.5-35B  (Haiku/高速)
+  (tool_use)     (自動モデル振り分け)       └─ VLM :5002 → Qwen3-VL-8B  (画像あり→自動)
 ```
 
-Claude Code は本家 Anthropic API と同じプロトコルで通信。プロキシがモデル名を見て自動的に振り分ける:
+Claude Code は本家 Anthropic API と同じプロトコルで通信。プロキシがモデル名とメッセージ内容を見て自動的に振り分ける:
 
-| Claude Code が送るモデル名 | 振り分け先 | 用途 |
-|---------------------------|-----------|------|
-| `claude-sonnet-4-6` | Qwen3.5-122B (:5000) | 汎用・高品質 |
-| `claude-opus-4-6` | Qwen3.5-122B (:5000) | 汎用・高品質 |
+| 条件 | 振り分け先 | 用途 |
+|------|-----------|------|
+| `claude-sonnet-4-6` / `claude-opus-4-6` | Qwen3.5-122B (:5000) | 汎用・高品質 |
 | `claude-haiku-4-5` | Qwen3.5-35B-A3B (:5001) | 高速・軽量 |
+| メッセージに画像が含まれる | Qwen3-VL-8B (:5002) | 画像理解（自動検出） |
 
 ## 必要なもの
 
@@ -104,8 +104,11 @@ Anthropic Messages API と OpenAI Chat Completions API を相互変換する軽�
 |---------|-------|-----------|-----|------|
 | main (:5000) | Qwen3.5-122B-A10B-4bit | 122B (MoE, active 10B) | ~60GB | 汎用・高品質 |
 | fast (:5001) | Qwen3.5-35B-A3B-4bit | 35B (MoE, active 3B) | ~8GB | 高速・軽量タスク |
+| vision (:5002) | Qwen3-VL-8B-Instruct-4bit | 8B | ~5GB | 画像理解 |
 
-128GB Mac なら両方同時に載る。64GB の場合は main のみ起動される。
+128GB Mac なら全モデル同時に載る（合計 ~73GB）。64GB の場合は main + vision のみ推奨。
+
+画像対応はメッセージに画像が含まれていると自動でVLMにルーティングされる。base64・URL両対応。
 
 ## カスタマイズ
 
