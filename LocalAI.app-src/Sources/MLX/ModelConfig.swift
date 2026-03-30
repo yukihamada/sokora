@@ -19,25 +19,27 @@ enum ModelRegistry {
 
     // MARK: - Preset Catalog
 
+    // M2 Air 16GB: only models that fit comfortably (≤ 10GB)
     static let presets: [ModelPreset] = [
-        // Main (高品質)
-        ModelPreset(id: "qwen122b",   displayName: "Qwen3.5-122B (高品質)",  mlxModelID: "mlx-community/Qwen3.5-122B-A10B-4bit",        ramGB: 60, slot: "main"),
-        ModelPreset(id: "deepseekv4", displayName: "DeepSeek-V4 (最高品質)", mlxModelID: "mlx-community/DeepSeek-V4-4bit",               ramGB: 80, slot: "main"),
-        ModelPreset(id: "qwen14b",    displayName: "Qwen3-14B (中品質)",     mlxModelID: "mlx-community/Qwen3-14B-4bit",                 ramGB: 9,  slot: "main"),
-        // Fast (高速)
-        ModelPreset(id: "qwen35b",    displayName: "Qwen3.5-35B (高速)",     mlxModelID: "mlx-community/Qwen3.5-35B-A3B-4bit",           ramGB: 8,  slot: "fast"),
-        ModelPreset(id: "qwen9b",     displayName: "Qwen3.5-9B (軽量)",      mlxModelID: "mlx-community/Qwen3.5-9B-4bit",                ramGB: 5,  slot: "fast"),
-        ModelPreset(id: "qwen4b",     displayName: "Qwen3.5-4B (超軽量)",    mlxModelID: "mlx-community/Qwen3.5-4B-4bit",                ramGB: 3,  slot: "fast"),
+        // Main
+        ModelPreset(id: "qwen35bmoe", displayName: "Qwen3.5-35B MoE (高速高品質)", mlxModelID: "mlx-community/Qwen3.5-35B-A3B-4bit",  ramGB: 8,  slot: "main"),
+        ModelPreset(id: "qwen14b",    displayName: "Qwen3-14B (高品質)",           mlxModelID: "mlx-community/Qwen3-14B-4bit",         ramGB: 9,  slot: "main"),
+        ModelPreset(id: "qwen9b",     displayName: "Qwen3.5-9B (標準)",            mlxModelID: "mlx-community/Qwen3.5-9B-4bit",        ramGB: 6,  slot: "main"),
+        ModelPreset(id: "qwen4b",     displayName: "Qwen3.5-4B (バランス)",        mlxModelID: "mlx-community/Qwen3.5-4B-4bit",        ramGB: 3,  slot: "main"),
+        // Fast — default for M2 Air 16GB (fits easily in RAM alongside other apps)
+        ModelPreset(id: "qwen17b",    displayName: "Qwen3-1.7B (超高速)",          mlxModelID: "mlx-community/Qwen3-1.7B-4bit",        ramGB: 1,  slot: "fast"),
+        ModelPreset(id: "qwen4b_f",   displayName: "Qwen3.5-4B (高速)",            mlxModelID: "mlx-community/Qwen3.5-4B-4bit",        ramGB: 3,  slot: "fast"),
+        ModelPreset(id: "qwen8b",     displayName: "Qwen3-8B (バランス)",          mlxModelID: "mlx-community/Qwen3-8B-4bit",          ramGB: 5,  slot: "fast"),
         // Vision
-        ModelPreset(id: "vl8b",       displayName: "Qwen3-VL-8B (ビジョン)", mlxModelID: "mlx-community/Qwen3-VL-8B-Instruct-4bit",      ramGB: 5,  slot: "vision"),
-        ModelPreset(id: "vl4b",       displayName: "Qwen3-VL-4B (軽量VL)",   mlxModelID: "mlx-community/Qwen3-VL-4B-Instruct-4bit",      ramGB: 3,  slot: "vision"),
+        ModelPreset(id: "vl4b",       displayName: "Qwen3-VL-4B (ビジョン)",       mlxModelID: "mlx-community/Qwen3-VL-4B-Instruct-4bit", ramGB: 3, slot: "vision"),
     ]
 
     // MARK: - Active Model Selection (UserDefaults)
 
     static func activeModelID(slot: String) -> String {
-        let defaults = ["main": "qwen122b", "fast": "qwen35b", "vision": "vl8b"]
-        return UserDefaults.standard.string(forKey: "sokora.model.\(slot)") ?? defaults[slot] ?? "qwen122b"
+        // M2 Air 16GB default: 1.7B for fast (reliable under load), 4B for main (when RAM available)
+        let defaults = ["main": "qwen4b", "fast": "qwen17b", "vision": "vl4b"]
+        return UserDefaults.standard.string(forKey: "sokora.model.\(slot)") ?? defaults[slot] ?? "qwen17b"
     }
 
     static func setActiveModel(slot: String, presetID: String) {
@@ -79,9 +81,10 @@ enum ModelRegistry {
         ]
     }
 
-    static let portMain   = Int(ProcessInfo.processInfo.environment["MLX_PORT_MAIN"]   ?? "5000") ?? 5000
+    // M2 Air: sokora runs on 5001 (single node). Fast/Vision also use same port until separate instances start.
+    static let portMain   = Int(ProcessInfo.processInfo.environment["MLX_PORT_MAIN"]   ?? "5001") ?? 5001
     static let portFast   = Int(ProcessInfo.processInfo.environment["MLX_PORT_FAST"]   ?? "5001") ?? 5001
-    static let portVision = Int(ProcessInfo.processInfo.environment["MLX_PORT_VISION"] ?? "5002") ?? 5002
+    static let portVision = Int(ProcessInfo.processInfo.environment["MLX_PORT_VISION"] ?? "5001") ?? 5001
     static let proxyPort  = Int(ProcessInfo.processInfo.environment["PROXY_PORT"]      ?? "4001") ?? 4001
 
     // MARK: - Routing
