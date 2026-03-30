@@ -1,0 +1,9 @@
+.build/
+*.o
+*.d
+DerivedData/
+Sokora.app/
+*.xcuserstate
+.DS_Store
+vendor/mlx-swift-examples/.git
+vendor/

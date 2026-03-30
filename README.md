@@ -11,10 +11,11 @@
 
 # 🤖 Sokora
 
-### **Run powerful AI models locally on Apple Silicon — and share them with the world**
+### **Run powerful AI models locally on Apple Silicon — zero API cost**
 
-*A native macOS menu bar app that turns your Mac into a local AI inference server.*
+*A native macOS menu bar app + Swift inference daemon that turns your Mac into a local AI node.*
 *Compatible with Claude Code, Aider, Open WebUI, and any OpenAI/Anthropic-compatible client.*
+*Supports Qwen3 / Qwen3.5 / Llama / DeepSeek and more via MLX — with automatic Python fallback for new architectures.*
 
 [English](#english) · [日本語](#日本語) · [中文](#中文) · [한국어](#한국어)
 
@@ -26,14 +27,16 @@
 
 ## ✨ Features
 
-- **🖥️ Native Menu Bar App** — Runs quietly in your menu bar as a native Swift `.app` bundle. No Python, no terminal, no friction.
+- **🖥️ Native Menu Bar App** — Runs quietly in your menu bar as a native Swift `.app` bundle. Green dot = inference ready.
 - **⚡ Apple Silicon Optimized** — Powered by [MLX](https://github.com/ml-explore/mlx), squeezing maximum performance from M1/M2/M3/M4 chips and unified memory.
 - **🔌 Dual API Compatibility** — Speaks both **Anthropic** (`/v1/messages`) and **OpenAI** (`/v1/chat/completions`) protocols out of the box.
 - **🌊 SSE Streaming** — Full server-sent events streaming for real-time token generation.
 - **🛠️ Tool Use** — Supports `tool_use` / function calling for agentic workflows.
+- **🤖 Swift + Python Hybrid** — Swift MLX for supported models (Qwen3, Llama, etc.), automatic transparent fallback to `mlx_lm` for new architectures (Qwen3.5, GatedDeltaNet-based models).
 - **🌐 DePIN Mode** — Share your idle GPU over Cloudflare Tunnel and earn rewards while you're away.
 - **😴 Sleep Prevention** — Keeps your Mac awake while serving requests.
 - **🔒 Privacy First** — All inference runs 100% on-device. Your data never leaves your machine.
+- **🖥️ Multi-node Ready** — Run on multiple Macs on the same LAN; route traffic to the most capable node.
 
 ---
 
@@ -72,12 +75,18 @@
 
 ## 🤖 Supported Models
 
-| Model | Size | VRAM (Approx.) | Best For |
-|-------|------|----------------|----------|
-| **Qwen3.5-122B** | 122B | 64 GB+ | Maximum quality, complex reasoning |
-| **Qwen3.5-35B** | 35B | 24 GB+ | Balanced quality & speed |
-| **Qwen3-VL-8B** | 8B | 16 GB+ | Vision + language tasks |
-| **DeepSeek-V4** | — | 32 GB+ | Code generation, analysis |
+| Model | RAM Needed | Swift MLX | Notes |
+|-------|-----------|-----------|-------|
+| **Qwen3.5-4B-4bit** | 3 GB | ✅ via Python fallback | Best for 16 GB Macs |
+| **Qwen3.5-9B-4bit** | 6 GB | ✅ via Python fallback | Recommended default |
+| **Qwen3.5-35B-A3B-4bit** | 8 GB | ✅ via Python fallback | MoE, high quality |
+| **Qwen3-14B-4bit** | 9 GB | ✅ native Swift | |
+| **Qwen3.5-122B-A10B-4bit** | 60 GB | ✅ via Python fallback | M4 Max/Ultra only |
+| **Qwen3-VL-4B-4bit** | 3 GB | ✅ via Python fallback | Vision + language |
+| **DeepSeek-V4-4bit** | 80 GB+ | ✅ via Python fallback | Ultra-class only |
+| Any `mlx-community/*` model | varies | ✅ via Python fallback | Auto-detected |
+
+> **Swift MLX** handles Qwen3, Llama, Mistral, Gemma natively. All other architectures (Qwen3.5 GatedDeltaNet, SSM-based models) transparently use `python -m mlx_lm server` as a subprocess — no configuration needed.
 
 ---
 
@@ -85,54 +94,108 @@
 
 | Unified Memory | Recommended Model | Expected Speed |
 |----------------|-------------------|----------------|
-| 16 GB | Qwen3-VL-8B | ~30 tok/s |
-| 24 GB | Qwen3.5-35B | ~20 tok/s |
-| 48 GB | Qwen3.5-35B (full) | ~35 tok/s |
-| 64 GB+ | Qwen3.5-122B | ~10 tok/s |
-| 128 GB+ | Qwen3.5-122B (full) | ~20 tok/s |
+| **16 GB** (M2 Air) | `Qwen3.5-4B-4bit` | ~40 tok/s |
+| **24 GB** | `Qwen3.5-9B-4bit` | ~35 tok/s |
+| **36 GB** | `Qwen3.5-35B-A3B-4bit` | ~25 tok/s |
+| **48 GB** | `Qwen3-14B-4bit` + vision | ~30 tok/s |
+| **64 GB+** | `Qwen3.5-122B-A10B-4bit` | ~10 tok/s |
+| **128 GB+** | `Qwen3.5-122B` (full precision) | ~20 tok/s |
 
 ---
 
 ## 🚀 Quick Start
 
-### Step 1 — Clone the repository
+### Prerequisites
+
+```bash
+# Python 3.11 + mlx_lm (required for Qwen3.5 and other new models)
+brew install python@3.11
+pip3.11 install 'mlx-lm>=0.21' 'transformers>=4.49'
+```
+
+### Step 1 — Clone & build the inference daemon
 
 ```bash
 git clone https://github.com/yukihamada/sokora ~/sokora
+cd ~/sokora
+
+# Build the sokora binary
+swift build -c release --package-path sokora-swift
+cp sokora-swift/.build/arm64-apple-macosx/release/sokora ~/.local/bin/sokora
 ```
 
-### Step 2 — Set up the MLX backend
+### Step 2 — Build the menu bar app
 
 ```bash
-brew install python@3.11
-python3.11 -m venv ~/mlx_env
-source ~/mlx_env/bin/activate
-pip install mlx-lm
-```
-
-### Step 3 — Build the app
-
-```bash
-cd ~/sokora/LocalAI.app-src
+cd sokora-swift/LocalAI.app-src
 swift build -c release
 bash build-app.sh
+cp -R Sokora.app /Applications/
+# Remove macOS quarantine and sign
+xattr -c /Applications/Sokora.app
+codesign --force --deep --sign - /Applications/Sokora.app
 ```
 
-### Step 4 — Install & launch
+### Step 3 — Install LaunchAgents (auto-start on login)
 
 ```bash
-# Copy to Applications
-cp -R Sokora.app /Applications/
+# Inference daemon (sokora node) — choose model based on your RAM
+MODEL="mlx-community/Qwen3.5-4B-4bit"   # 16 GB Mac
+# MODEL="mlx-community/Qwen3.5-9B-4bit" # 24 GB+ Mac
 
-# Launch now
-open /Applications/Sokora.app
+cat > ~/Library/LaunchAgents/io.sokora.node.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.sokora.node</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/$USER/.local/bin/sokora</string>
+    <string>start</string>
+    <string>--model</string><string>$MODEL</string>
+    <string>--port</string><string>5001</string>
+    <string>--host</string><string>127.0.0.1</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+</dict>
+</plist>
+EOF
 
-# — or — auto-start on login
-cp com.sokora.menubar.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.sokora.menubar.plist
+launchctl load -w ~/Library/LaunchAgents/io.sokora.node.plist
+
+# Menu bar app
+cat > ~/Library/LaunchAgents/com.sokora.menubar.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.sokora.menubar</string>
+  <key>ProgramArguments</key>
+  <array><string>/Applications/Sokora.app/Contents/MacOS/Sokora</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MLX_PORT_MAIN</key><string>5001</string>
+    <key>MLX_PORT_FAST</key><string>5001</string>
+    <key>PROXY_PORT</key><string>4001</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+</dict>
+</plist>
+EOF
+
+launchctl load -w ~/Library/LaunchAgents/com.sokora.menubar.plist
 ```
 
-Sokora will appear as a robot icon (🤖) in your menu bar. Click it to select a model and start the server.
+The 🧠 icon will appear in your menu bar. Green dots = inference ready.
+
+> **First launch note:** MLX compiles Metal shaders on first run — this takes 2–5 minutes. The menu bar shows ○ (grey) during warmup, then switches to ● (green) when ready.
 
 ---
 
@@ -253,16 +316,39 @@ bash build-app.sh
 
 ```
 sokora/
-├── LocalAI.app-src/        # Swift source code
+├── Sources/Sokora/         # Inference daemon (Swift 6)
+│   ├── SokoraMain.swift    # CLI entry point, Python fallback logic
+│   ├── ModelManager.swift  # MLX model loading
+│   ├── ChatHandler.swift   # OpenAI-compatible /v1/chat/completions
+│   ├── Server.swift        # Hummingbird HTTP server
+│   └── Registration.swift  # chatweb.ai node registration
+├── LocalAI.app-src/        # Menu bar app (Swift 6 + AppKit)
 │   ├── Sources/
-│   │   ├── App/            # SwiftUI menu bar app
-│   │   ├── Proxy/          # HTTP proxy server
-│   │   └── DePIN/          # Cloudflare tunnel manager
-│   ├── build-app.sh        # App bundle script
+│   │   ├── App/            # NSApplication delegate
+│   │   ├── Menubar/        # NSStatusItem, status polling
+│   │   ├── Server/         # Hummingbird proxy (port 4001)
+│   │   ├── MLX/            # Model registry & routing
+│   │   └── Dashboard/      # HTML dashboard (/)
+│   ├── build-app.sh        # .app bundle script
 │   └── Package.swift
-├── com.sokora.menubar.plist # LaunchAgent config
-└── README.md
+├── vendor/                 # Patched mlx-swift-examples
+│   └── mlx-swift-examples/ # Qwen3.5 type alias, quantization fix
+└── Package.swift           # sokora daemon package
 ```
+
+### How the Hybrid Inference Works
+
+```
+sokora start --model mlx-community/Qwen3.5-4B-4bit
+       │
+       ├─ Try Swift MLX (fast, native)
+       │   └─ Fails? (unsupported arch, keyNotFound, config.json error)
+       │
+       └─ Launch subprocess: python -m mlx_lm server --model ... --port 5001
+           └─ Transparently serves /v1/chat/completions on same port
+```
+
+All model types in `mlx-community/*` are supported this way. The proxy in `Sokora.app` routes any API call (Anthropic or OpenAI format) to the running backend.
 
 ---
 
