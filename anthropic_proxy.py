@@ -1,5 +1,5 @@
-"""Anthropic Messages API -> OpenAI Chat Completions proxy for MLX
-Supports: text, streaming, tool_use/tool_result, multi-model routing
+"""Anthropic Messages API + OpenAI Chat Completions proxy for MLX
+Supports: Claude Code (Anthropic), Aider/OpenWebUI (OpenAI), streaming, tool_use
 Performance: uvloop, connection pooling, persistent sessions"""
 import json, uuid, time, os
 try:
@@ -60,6 +60,29 @@ MODEL_ROUTES = {
 }
 
 DEFAULT_BACKEND = "main"
+
+# Map OpenAI-style model names -> backend (for Aider, Open WebUI, etc.)
+OPENAI_MODEL_ROUTES = {
+    "qwen3.5-122b": "main",
+    "qwen3.5-35b":  "fast",
+    "qwen3-vl-8b":  "vision",
+    "gpt-4":        "main",
+    "gpt-4o":       "main",
+    "gpt-4o-mini":  "fast",
+    "gpt-3.5-turbo":"fast",
+}
+
+def get_backend_openai(model_name, messages=None):
+    """Resolve OpenAI-style model name to MLX backend."""
+    if messages and has_images(messages):
+        return MODELS.get("vision", MODELS["main"])
+    lower = model_name.lower().replace("openai/", "")
+    for prefix, key in OPENAI_MODEL_ROUTES.items():
+        if lower.startswith(prefix):
+            return MODELS.get(key, MODELS["main"])
+    # Also check Anthropic routes (in case someone sends claude-* via OpenAI endpoint)
+    key = MODEL_ROUTES.get(model_name, DEFAULT_BACKEND)
+    return MODELS.get(key, MODELS["main"])
 
 def has_images(messages):
     """Check if any message contains image content"""
@@ -272,7 +295,7 @@ async def handle_messages(request):
     # Non-streaming
     session = await get_session()
     async with session.post(mlx_url, json=oai_body) as resp:
-        data = await resp.json()
+        data = await resp.json(content_type=None)
 
     return web.json_response(oai_response_to_anthropic(data, model))
 
@@ -409,6 +432,48 @@ async def handle_stream(request, oai_body, model, mlx_url):
     await response.write_eof()
     return response
 
+# ── OpenAI Chat Completions endpoint (for Aider, Open WebUI, etc.) ──
+
+async def handle_chat_completions(request):
+    """OpenAI-compatible /v1/chat/completions — passthrough to MLX with model routing"""
+    body = await request.json()
+    model = body.get("model", "qwen3.5-122b")
+    stream = body.get("stream", False)
+    backend = get_backend_openai(model, body.get("messages", []))
+    mlx_url = f"http://127.0.0.1:{backend['port']}/v1/chat/completions"
+    log(f"POST /v1/chat/completions model={model} -> {backend['label']} :{backend['port']} stream={stream}")
+
+    # Forward to MLX, replacing model name with actual MLX model
+    fwd_body = dict(body)
+    fwd_body["model"] = backend["mlx_model"]
+    if "chat_template_kwargs" not in fwd_body:
+        fwd_body["chat_template_kwargs"] = {"enable_thinking": False}
+
+    session = await get_session()
+
+    if not stream:
+        async with session.post(mlx_url, json=fwd_body) as resp:
+            data = await resp.json(content_type=None)
+        # Return original model name in response
+        data["model"] = model
+        return web.json_response(data)
+
+    # Streaming: passthrough SSE from MLX
+    response = web.StreamResponse()
+    response.headers["Content-Type"] = "text/event-stream"
+    response.headers["Cache-Control"] = "no-cache"
+    await response.prepare(request)
+
+    fwd_body["stream"] = True
+    async with session.post(mlx_url, json=fwd_body) as resp:
+        async for line in resp.content:
+            decoded = line.decode()
+            if decoded.strip():
+                await response.write(line)
+
+    await response.write_eof()
+    return response
+
 async def handle_count_tokens(request):
     body = await request.json()
     log(f"POST /v1/messages/count_tokens")
@@ -418,11 +483,17 @@ async def handle_count_tokens(request):
 
 async def handle_models(request):
     log(f"GET /v1/models")
-    return web.json_response({
-        "data": [{"id": m, "object": "model", "created": 1677610602, "owned_by": "anthropic"}
-                 for m in MODEL_ROUTES.keys()],
-        "object": "list"
-    })
+    models = []
+    # Anthropic model names (for Claude Code)
+    for m in MODEL_ROUTES.keys():
+        models.append({"id": m, "object": "model", "created": 1677610602, "owned_by": "anthropic"})
+    # OpenAI-style names (for Aider, Open WebUI, etc.)
+    for m in OPENAI_MODEL_ROUTES.keys():
+        models.append({"id": m, "object": "model", "created": 1677610602, "owned_by": "local-mlx"})
+    # Actual MLX model names
+    for key, cfg in MODELS.items():
+        models.append({"id": cfg["mlx_model"], "object": "model", "created": 1677610602, "owned_by": "local-mlx"})
+    return web.json_response({"data": models, "object": "list"})
 
 async def catch_all(request):
     body = await request.text()
@@ -438,11 +509,12 @@ app = web.Application()
 app.on_cleanup.append(on_cleanup)
 app.router.add_post("/v1/messages/count_tokens", handle_count_tokens)
 app.router.add_post("/v1/messages", handle_messages)
+app.router.add_post("/v1/chat/completions", handle_chat_completions)
 app.router.add_get("/v1/models", handle_models)
 app.router.add_route("*", "/{path:.*}", catch_all)
 
 if __name__ == "__main__":
     for name, cfg in MODELS.items():
         log(f"  [{name}] {cfg['mlx_model']} -> :{cfg['port']} ({cfg['label']})")
-    log(f"Anthropic proxy on :4001 (multi-model, tool_use)")
+    log(f"Proxy on :4001 — Anthropic (/v1/messages) + OpenAI (/v1/chat/completions)")
     web.run_app(app, host="0.0.0.0", port=4001, print=lambda x: log(x))

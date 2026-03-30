@@ -107,8 +107,9 @@ fi
 
 source "$VENV/bin/activate"
 pip install --upgrade pip -q
-pip install mlx-lm aiohttp -q
+pip install mlx-lm aiohttp aider-chat -q
 echo "  mlx-lm $(pip show mlx-lm 2>/dev/null | grep Version | cut -d' ' -f2)"
+echo "  aider  $(pip show aider-chat 2>/dev/null | grep Version | cut -d' ' -f2)"
 
 # -------------------------------------------------------
 # 3. Download model (if not cached)
@@ -298,6 +299,8 @@ ai-local() { python3 ~/ai-switch.py local; export ANTHROPIC_BASE_URL=http://127.
 ai-cloud() { python3 ~/ai-switch.py cloud; unset ANTHROPIC_BASE_URL; unset ANTHROPIC_API_KEY; }
 alias cld='ai-local && claude --dangerously-skip-permissions'
 alias clc='ai-cloud && claude'
+alias aid='source ~/mlx_env/bin/activate && OPENAI_API_BASE=http://127.0.0.1:4001/v1 OPENAI_API_KEY=sk-dummy aider --model openai/qwen3.5-122b'
+alias aidf='source ~/mlx_env/bin/activate && OPENAI_API_BASE=http://127.0.0.1:4001/v1 OPENAI_API_KEY=sk-dummy aider --model openai/qwen3.5-35b'
 RCEOF
   echo "  Added aliases to ~/.zshrc"
 else
@@ -315,6 +318,8 @@ echo ""
 echo " 1. ~/ai.sh start   -> Start MLX + proxy"
 echo " 2. cld              -> Claude Code (local, tool_use OK)"
 echo "    clc              -> Claude Code (Anthropic cloud)"
+echo "    aid              -> Aider (local, 122B)"
+echo "    aidf             -> Aider (local, 35B fast)"
 echo " 3. ~/ai.sh stop     -> Stop everything"
 echo ""
 echo " First run: ~/ai.sh start"

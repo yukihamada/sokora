@@ -1,6 +1,6 @@
-# Local Claude Code with MLX
+# Local Claude Code + Aider with MLX
 
-Apple Silicon Mac で Claude Code をローカル実行。API費用ゼロ、ツール実行対応、完全オフライン動作。
+Apple Silicon Mac で Claude Code **と Aider** をローカル実行。API費用ゼロ、ツール実行対応、完全オフライン動作。
 
 > **16GB の M2 Air から 128GB の M5 Max まで、全Mac対応。** RAMを自動検出して最適なモデルを選択。`bash setup.sh` だけ。
 
@@ -10,8 +10,11 @@ Apple Silicon Mac で Claude Code をローカル実行。API費用ゼロ、ツ�
 
 ```
                                           ┌─ MLX :5000 → Qwen3.5-122B (Sonnet/Opus)
-Claude Code  →  Anthropic Proxy (:4001) ──┼─ MLX :5001 → Qwen3.5-35B  (Haiku/高速)
-  (tool_use)     (自動モデル振り分け)       └─ VLM :5002 → Qwen3-VL-8B  (画像あり→自動)
+Claude Code  →  Anthropic API (:4001) ────┼─ MLX :5001 → Qwen3.5-35B  (Haiku/高速)
+  (tool_use)     /v1/messages              └─ VLM :5002 → Qwen3-VL-8B  (画像あり→自動)
+                        │
+Aider        →  OpenAI API (:4001) ───────── 同じMLXバックエンド
+  (edit/ask)     /v1/chat/completions         モデル名で自動振り分け
 ```
 
 Claude Code は本家 Anthropic API と同じプロトコルで通信。プロキシがモデル名とメッセージ内容を見て自動的に振り分ける:
@@ -76,6 +79,12 @@ ssh user@mac-ip "bash -s" < setup.sh
 # ローカルAIでClaude Code起動
 cld
 
+# ローカルAIでAider起動（122Bモデル）
+aid
+
+# Aider高速モード（35Bモデル）
+aidf
+
 # 本家Anthropicに切り替え
 clc
 ```
@@ -91,6 +100,8 @@ clc
 | `~/ai.sh restart` | 再起動 |
 | `cld` | ローカルAIで Claude Code |
 | `clc` | 本家 Anthropic で Claude Code |
+| `aid` | ローカルAIで Aider (122B) |
+| `aidf` | ローカルAIで Aider (35B 高速) |
 | `ai-local` | ローカルに切替（起動しない） |
 | `ai-cloud` | クラウドに切替（起動しない） |
 | `~/ai.sh img "プロンプト"` | FLUX.1で画像生成 (~17秒) |
@@ -98,16 +109,56 @@ clc
 | `~/ai.sh vid "プロンプト"` | Wan 2.1で動画生成 (~10分) |
 | `~/ai.sh vid "プロンプト" file.mp4` | ファイル名指定 |
 
+## Aider で使う
+
+`setup.sh` で Aider も自動インストールされる。プロキシが OpenAI 互換 `/v1/chat/completions` を提供するので、そのまま動く。
+
+```bash
+# エイリアスで起動（推奨）
+aid                    # 122B モデル
+aidf                   # 35B 高速モデル
+
+# 手動で起動する場合
+OPENAI_API_BASE=http://127.0.0.1:4001/v1 \
+OPENAI_API_KEY=sk-dummy \
+aider --model openai/qwen3.5-122b
+
+# リモートMacのMLXを使う場合
+OPENAI_API_BASE=http://192.168.0.5:4001/v1 \
+OPENAI_API_KEY=sk-dummy \
+aider --model openai/qwen3.5-122b
+```
+
+### Aider 用モデル名マッピング
+
+| モデル名 | 振り分け先 |
+|---------|-----------|
+| `openai/qwen3.5-122b` | main (122B) |
+| `openai/qwen3.5-35b` | fast (35B) |
+| `openai/qwen3-vl-8b` | vision (VL 8B) |
+| `openai/gpt-4o` | main (122B) |
+| `openai/gpt-4o-mini` | fast (35B) |
+
+### 他の OpenAI 互換ツールでも使える
+
+Open WebUI, Continue, Cline, LiteLLM など、OpenAI API を話すツールなら何でも:
+```
+API Base: http://127.0.0.1:4001/v1
+API Key:  sk-dummy (何でもOK)
+Model:    qwen3.5-122b
+```
+
 ## アーキテクチャ
 
-### Anthropic Proxy (`anthropic_proxy.py`)
+### Dual-Protocol Proxy (`anthropic_proxy.py`)
 
-Anthropic Messages API と OpenAI Chat Completions API を相互変換する軽量プロキシ（aiohttp）。
+Anthropic Messages API **と** OpenAI Chat Completions API の両方を提供するデュアルプロトコルプロキシ（aiohttp）。
 
 **エンドポイント:**
-- `POST /v1/messages` — チャット（ストリーミング対応）
+- `POST /v1/messages` — Anthropic形式（Claude Code用、tool_use変換あり）
+- `POST /v1/chat/completions` — OpenAI形式（Aider/Open WebUI用、MLXにパススルー）
 - `POST /v1/messages/count_tokens` — トークン数カウント
-- `GET /v1/models` — モデル一覧
+- `GET /v1/models` — モデル一覧（Anthropic名 + OpenAI名 両方返す）
 
 **tool_use 変換テーブル:**
 
