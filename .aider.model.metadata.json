@@ -1,0 +1,20 @@
+{
+  "openai/qwen3.5-122b": {
+    "max_tokens": 32768,
+    "max_input_tokens": 131072,
+    "max_output_tokens": 32768,
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "litellm_provider": "openai",
+    "mode": "chat"
+  },
+  "openai/qwen3.5-35b": {
+    "max_tokens": 32768,
+    "max_input_tokens": 131072,
+    "max_output_tokens": 32768,
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "litellm_provider": "openai",
+    "mode": "chat"
+  }
+}

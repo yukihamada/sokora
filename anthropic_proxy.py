@@ -7,6 +7,7 @@ try:
     uvloop.install()
 except ImportError:
     pass
+import aiohttp
 from aiohttp import web, ClientSession, TCPConnector
 
 # Persistent session with connection pooling (reuse TCP connections to MLX)
@@ -446,17 +447,37 @@ async def handle_chat_completions(request):
     # Forward to MLX, replacing model name with actual MLX model
     fwd_body = dict(body)
     fwd_body["model"] = backend["mlx_model"]
-    if "chat_template_kwargs" not in fwd_body:
-        fwd_body["chat_template_kwargs"] = {"enable_thinking": False}
+    # Always disable thinking for cleaner output
+    fwd_body["chat_template_kwargs"] = {"enable_thinking": False}
+    # Remove litellm-specific fields that MLX doesn't understand
+    for key in ["user", "logprobs", "top_logprobs", "n"]:
+        fwd_body.pop(key, None)
+    # MLX requires system messages at the beginning — merge all system msgs into one
+    if "messages" in fwd_body:
+        msgs = fwd_body["messages"]
+        sys_parts = [m["content"] for m in msgs if m.get("role") == "system"]
+        non_sys = [m for m in msgs if m.get("role") != "system"]
+        if sys_parts:
+            fwd_body["messages"] = [{"role": "system", "content": "\n\n".join(sys_parts)}] + non_sys
+        else:
+            fwd_body["messages"] = non_sys
 
     session = await get_session()
 
     if not stream:
-        async with session.post(mlx_url, json=fwd_body) as resp:
-            data = await resp.json(content_type=None)
-        # Return original model name in response
-        data["model"] = model
-        return web.json_response(data)
+        try:
+            async with session.post(mlx_url, json=fwd_body, timeout=aiohttp.ClientTimeout(total=600)) as resp:
+                if resp.status != 200:
+                    err_text = await resp.text()
+                    log(f"MLX error {resp.status}: {err_text[:300]}")
+                    return web.json_response({"error": {"message": err_text, "type": "server_error"}}, status=resp.status)
+                data = await resp.json(content_type=None)
+            # Return original model name in response
+            data["model"] = model
+            return web.json_response(data)
+        except Exception as e:
+            log(f"Chat completions error: {e}")
+            return web.json_response({"error": {"message": str(e), "type": "server_error"}}, status=500)
 
     # Streaming: passthrough SSE from MLX
     response = web.StreamResponse()
@@ -473,6 +494,24 @@ async def handle_chat_completions(request):
 
     await response.write_eof()
     return response
+
+async def handle_health(request):
+    """Check health of all MLX backends"""
+    status = {"status": "ok", "models": {}}
+    session = await get_session()
+    
+    for name, cfg in MODELS.items():
+        port = cfg["port"]
+        url = f"http://127.0.0.1:{port}/health"
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                status["models"][name] = resp.status == 200
+        except Exception:
+            status["models"][name] = False
+    
+    # If all are down, mark overall status as degraded (optional, keeping "ok" for proxy itself)
+    # For now, we just report individual model status.
+    return web.json_response(status)
 
 async def handle_count_tokens(request):
     body = await request.json()
@@ -507,6 +546,7 @@ async def on_cleanup(app):
 
 app = web.Application()
 app.on_cleanup.append(on_cleanup)
+app.router.add_get("/health", handle_health)
 app.router.add_post("/v1/messages/count_tokens", handle_count_tokens)
 app.router.add_post("/v1/messages", handle_messages)
 app.router.add_post("/v1/chat/completions", handle_chat_completions)
