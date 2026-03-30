@@ -110,7 +110,7 @@ class MenubarController {
         addItem(menu, "  Open Generated Images",  #selector(openGenerated), "")
 
         menu.addItem(.separator())
-        addItem(menu, "  GitHub: yukihamada/local-claude", #selector(openGitHub), "")
+        addItem(menu, "  GitHub: yukihamada/sokora", #selector(openGitHub), "")
         menu.addItem(.separator())
         addItem(menu, "Quit", #selector(quit), "q")
 
@@ -363,11 +363,11 @@ class MenubarController {
 
     @objc func startDepin() {
         let depinPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("local-claude/depin").path
+            .appendingPathComponent("sokora/depin").path
         let script = """
         cd \(depinPath)
         if cargo build --release 2>/dev/null; then
-            nohup ./target/release/local-claude-depin --public > ~/depin.log 2>&1 &
+            nohup ./target/release/sokora-depin --public > ~/depin.log 2>&1 &
             echo "DePIN node started (PID: $!)"
         else
             echo "Build failed. Running: cargo build --release"
@@ -382,7 +382,7 @@ class MenubarController {
     }
 
     @objc func stopDepin() {
-        runShell("pkill -f local-claude-depin") { [weak self] _ in
+        runShell("pkill -f sokora-depin") { [weak self] _ in
             Task { @MainActor in self?.updateStatus() }
             self?.showAlert("DePIN Stopped", "Node stopped.")
         }
@@ -393,7 +393,7 @@ class MenubarController {
             .appendingPathComponent("depin.log").path
         let log = (try? String(contentsOfFile: logPath, encoding: .utf8)) ?? "No log yet."
         let lines = log.components(separatedBy: "\n").suffix(20).joined(separator: "\n")
-        let running = Self.isProcessRunning("local-claude-depin")
+        let running = Self.isProcessRunning("sokora-depin")
         showAlert("DePIN Status", "\(running ? "● Running" : "○ Stopped")\n\n\(lines)")
     }
 
@@ -512,7 +512,7 @@ class MenubarController {
     }
 
     @objc func openGitHub() {
-        NSWorkspace.shared.open(URL(string: "https://github.com/yukihamada/local-claude")!)
+        NSWorkspace.shared.open(URL(string: "https://github.com/yukihamada/sokora")!)
     }
 
     @objc func quit() {

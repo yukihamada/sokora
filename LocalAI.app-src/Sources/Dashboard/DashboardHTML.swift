@@ -5,7 +5,7 @@ enum DashboardHTML {
     <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>LocalAI Dashboard</title>
+    <title>Sokora Dashboard</title>
     <style>
     :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--green:#3fb950;--red:#f85149;--blue:#58a6ff;--yellow:#d29922}
     *{box-sizing:border-box;margin:0;padding:0}
@@ -29,7 +29,7 @@ enum DashboardHTML {
     </style>
     </head>
     <body>
-    <h1><span class="title-icon">&#x1F9E0;</span> LocalAI Dashboard</h1>
+    <h1><span class="title-icon">&#x1F9E0;</span> Sokora Dashboard</h1>
 
     <div class="section">
       <h2>&#x30E2;&#x30C7;&#x30EB;&#x72B6;&#x614B;</h2>

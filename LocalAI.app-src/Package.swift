@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "LocalAI",
+    name: "Sokora",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", .upToNextMinor(from: "2.30.3")),
@@ -10,7 +10,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "LocalAI",
+            name: "Sokora",
             dependencies: [
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
