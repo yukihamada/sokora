@@ -16,6 +16,7 @@ actor ProxyServer {
         router.get("/", use: DashboardHandler.handleRoot)
         router.get("/api/models", use: ModelsHandler.handleList)
         router.get("/api/logs", use: ModelsHandler.handleLogs)
+        router.get("/api/stats", use: StatsHandler.handle)
 
         let app = Application(
             router: router,

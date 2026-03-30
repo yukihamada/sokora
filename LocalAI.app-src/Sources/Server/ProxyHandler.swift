@@ -3,8 +3,45 @@ import Hummingbird
 import NIOCore
 
 struct ProxyHandler {
+
+    // MARK: - DePIN Auth
+    // Hummingbird 2.x: HTTPFields はカスタムヘッダーを rawName で比較
+    private static func headerValue(_ request: Request, name: String) -> String? {
+        request.headers.first(where: {
+            $0.name.rawName.caseInsensitiveCompare(name) == .orderedSame
+        })?.value
+    }
+
+    private static func checkDepinAuth(_ request: Request) -> Bool {
+        let isExternal = headerValue(request, name: "CF-Connecting-IP") != nil
+            || headerValue(request, name: "X-Forwarded-For").map { !$0.hasPrefix("127.") } ?? false
+        guard isExternal else { return true }  // ローカルは常に許可
+
+        if let storedKey = UserDefaults.standard.string(forKey: "sokora.depin.apiKey"),
+           !storedKey.isEmpty {
+            let authHeader = headerValue(request, name: "Authorization") ?? ""
+            if authHeader.hasPrefix("Bearer ") {
+                return String(authHeader.dropFirst(7)) == storedKey
+            }
+            // キーなしは今はパス（将来的に return false で厳格化可能）
+        }
+        return true
+    }
+
+    private static func isExternalRequest(_ request: Request) -> Bool {
+        return headerValue(request, name: "CF-Connecting-IP") != nil
+            || headerValue(request, name: "X-Forwarded-For").map { !$0.hasPrefix("127.") } ?? false
+    }
+
     // MARK: - POST /v1/messages
     static func handleMessages(_ request: Request, _ context: some RequestContext) async throws -> Response {
+        guard checkDepinAuth(request) else {
+            return Response(status: .unauthorized,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: .init(string: #"{"error":"Invalid API key"}"#)))
+        }
+        let isExt = isExternalRequest(request)
+
         let buf = try await request.body.collect(upTo: 50_000_000)
         guard let data = buf.getData(at: 0, length: buf.readableBytes),
               let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -17,7 +54,7 @@ struct ProxyHandler {
         let backend = ModelRegistry.backend(for: model, hasImages: hasImg)
         let mlxURL = URL(string: "http://127.0.0.1:\(backend.port)/v1/chat/completions")!
 
-        print("[Proxy] POST /v1/messages model=\(model) -> \(backend.label) stream=\(stream)")
+        print("[Proxy] POST /v1/messages model=\(model) -> \(backend.label) stream=\(stream) ext=\(isExt)")
 
         var oaiBody: [String: Any] = [
             "model": backend.mlxModel,
@@ -31,14 +68,21 @@ struct ProxyHandler {
         }
 
         if stream {
-            return try await handleAnthropicStream(oaiBody: oaiBody, model: model, mlxURL: mlxURL)
+            return try await handleAnthropicStream(oaiBody: oaiBody, model: model, mlxURL: mlxURL, isExternal: isExt)
         } else {
-            return try await handleAnthropicNonStream(oaiBody: oaiBody, model: model, mlxURL: mlxURL)
+            return try await handleAnthropicNonStream(oaiBody: oaiBody, model: model, mlxURL: mlxURL, isExternal: isExt)
         }
     }
 
     // MARK: - POST /v1/chat/completions (OpenAI passthrough for Aider)
     static func handleChatCompletions(_ request: Request, _ context: some RequestContext) async throws -> Response {
+        guard checkDepinAuth(request) else {
+            return Response(status: .unauthorized,
+                headers: [.contentType: "application/json"],
+                body: .init(byteBuffer: .init(string: #"{"error":"Invalid API key"}"#)))
+        }
+        let isExt = isExternalRequest(request)
+
         let buf = try await request.body.collect(upTo: 50_000_000)
         guard let data = buf.getData(at: 0, length: buf.readableBytes),
               var body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -46,7 +90,6 @@ struct ProxyHandler {
         }
         let model = body["model"] as? String ?? "qwen3.5-122b"
         let stream = body["stream"] as? Bool ?? false
-        let messages = body["messages"] as? [[String: Any]] ?? []
         let backend = ModelRegistry.backendOpenAI(for: model)
         let mlxURL = URL(string: "http://127.0.0.1:\(backend.port)/v1/chat/completions")!
 
@@ -65,7 +108,6 @@ struct ProxyHandler {
                 body["messages"] = nonSys
             }
         }
-        // Remove litellm-specific fields
         for key in ["user", "logprobs", "top_logprobs", "n"] { body.removeValue(forKey: key) }
 
         let fwdData = try JSONSerialization.data(withJSONObject: body)
@@ -76,21 +118,22 @@ struct ProxyHandler {
         req.timeoutInterval = 600
 
         if !stream {
+            let t0 = Date()
             let (respData, httpResp) = try await URLSession.shared.data(for: req)
+            let elapsed = Date().timeIntervalSince(t0)
             var respBody = (try? JSONSerialization.jsonObject(with: respData)) as? [String: Any] ?? [:]
+            let tokOut = (respBody["usage"] as? [String: Any])?["completion_tokens"] as? Int ?? 0
             respBody["model"] = model
+            await RequestStats.shared.record(isExternal: isExt, outputTokens: tokOut, elapsed: elapsed)
             let outData = try JSONSerialization.data(withJSONObject: respBody)
-            let status = HTTPResponse.Status(
-                code: (httpResp as? HTTPURLResponse)?.statusCode ?? 200
-            )
             return Response(
-                status: status,
+                status: HTTPResponse.Status(code: (httpResp as? HTTPURLResponse)?.statusCode ?? 200),
                 headers: [.contentType: "application/json"],
                 body: .init(byteBuffer: .init(data: outData))
             )
         }
 
-        return try await passthroughStream(req: req)
+        return try await passthroughStream(req: req, isExternal: isExt)
     }
 
     // MARK: - GET /v1/models
@@ -106,11 +149,8 @@ struct ProxyHandler {
             models.append(["id": cfg.mlxModel, "object": "model", "created": 1677610602, "owned_by": "local-mlx"])
         }
         let out = try JSONSerialization.data(withJSONObject: ["data": models, "object": "list"])
-        return Response(
-            status: .ok,
-            headers: [.contentType: "application/json"],
-            body: .init(byteBuffer: .init(data: out))
-        )
+        return Response(status: .ok, headers: [.contentType: "application/json"],
+                        body: .init(byteBuffer: .init(data: out)))
     }
 
     // MARK: - POST /v1/messages/count_tokens
@@ -125,50 +165,41 @@ struct ProxyHandler {
             acc + ((m["content"] as? String)?.count ?? 0) / 4
         }
         let out = try JSONSerialization.data(withJSONObject: ["input_tokens": total])
-        return Response(
-            status: .ok,
-            headers: [.contentType: "application/json"],
-            body: .init(byteBuffer: .init(data: out))
-        )
+        return Response(status: .ok, headers: [.contentType: "application/json"],
+                        body: .init(byteBuffer: .init(data: out)))
     }
 
     // MARK: - Non-streaming Anthropic
     private static func handleAnthropicNonStream(
-        oaiBody: [String: Any],
-        model: String,
-        mlxURL: URL
+        oaiBody: [String: Any], model: String, mlxURL: URL, isExternal: Bool
     ) async throws -> Response {
         let fwdData = try JSONSerialization.data(withJSONObject: oaiBody)
         var req = URLRequest(url: mlxURL)
-        req.httpMethod = "POST"
-        req.httpBody = fwdData
+        req.httpMethod = "POST"; req.httpBody = fwdData
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 600
+        let t0 = Date()
         let (respData, _) = try await URLSession.shared.data(for: req)
+        let elapsed = Date().timeIntervalSince(t0)
         guard let oaiResp = try? JSONSerialization.jsonObject(with: respData) as? [String: Any] else {
             return Response(status: .internalServerError)
         }
+        let tokOut = (oaiResp["usage"] as? [String: Any])?["completion_tokens"] as? Int ?? 0
+        await RequestStats.shared.record(isExternal: isExternal, outputTokens: tokOut, elapsed: elapsed)
         let anthropicResp = oaiResponseToAnthropic(oaiResp, model: model)
         let out = try JSONSerialization.data(withJSONObject: anthropicResp)
-        return Response(
-            status: .ok,
-            headers: [.contentType: "application/json"],
-            body: .init(byteBuffer: .init(data: out))
-        )
+        return Response(status: .ok, headers: [.contentType: "application/json"],
+                        body: .init(byteBuffer: .init(data: out)))
     }
 
     // MARK: - Streaming Anthropic (SSE)
     private static func handleAnthropicStream(
-        oaiBody: [String: Any],
-        model: String,
-        mlxURL: URL
+        oaiBody: [String: Any], model: String, mlxURL: URL, isExternal: Bool
     ) async throws -> Response {
-        var streamBody = oaiBody
-        streamBody["stream"] = true
+        var streamBody = oaiBody; streamBody["stream"] = true
         let fwdData = try JSONSerialization.data(withJSONObject: streamBody)
         var req = URLRequest(url: mlxURL)
-        req.httpMethod = "POST"
-        req.httpBody = fwdData
+        req.httpMethod = "POST"; req.httpBody = fwdData
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 600
 
@@ -182,11 +213,11 @@ struct ProxyHandler {
 
             var contentIndex = 0
             var textBlockStarted = false
+            var tokenCount = 0
+            let t0 = Date()
+
             struct ToolCall {
-                var id: String
-                var name: String
-                var args: String
-                var blockIdx: Int
+                var id: String; var name: String; var args: String; var blockIdx: Int
             }
             var toolCalls: [Int: ToolCall] = [:]
 
@@ -201,90 +232,81 @@ struct ProxyHandler {
                     let delta = choices.first?["delta"] as? [String: Any]
                 else { continue }
 
-                // Text delta
                 if let text = delta["content"] as? String, !text.isEmpty {
                     if !textBlockStarted {
-                        let blkStart = AnthropicSSE.contentBlockStart(index: contentIndex, type: "text")
-                        try await writer.write(ByteBuffer(string: blkStart))
+                        try await writer.write(ByteBuffer(string: AnthropicSSE.contentBlockStart(index: contentIndex, type: "text")))
                         textBlockStarted = true
                     }
-                    let textEvt = AnthropicSSE.textDelta(index: contentIndex, text: text)
-                    try await writer.write(ByteBuffer(string: textEvt))
+                    tokenCount += text.split(separator: " ").count  // rough estimate
+                    try await writer.write(ByteBuffer(string: AnthropicSSE.textDelta(index: contentIndex, text: text)))
                 }
 
-                // Tool calls
                 if let tcs = delta["tool_calls"] as? [[String: Any]] {
                     for tc in tcs {
                         let idx = tc["index"] as? Int ?? 0
                         let func_ = tc["function"] as? [String: Any] ?? [:]
                         if toolCalls[idx] == nil {
                             if textBlockStarted {
-                                let blkStop = AnthropicSSE.contentBlockStop(index: contentIndex)
-                                try await writer.write(ByteBuffer(string: blkStop))
-                                contentIndex += 1
-                                textBlockStarted = false
+                                try await writer.write(ByteBuffer(string: AnthropicSSE.contentBlockStop(index: contentIndex)))
+                                contentIndex += 1; textBlockStarted = false
                             }
                             let toolId = "toolu_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24))"
                             let toolName = func_["name"] as? String ?? ""
-                            let blkStart = AnthropicSSE.contentBlockStart(
-                                index: contentIndex, type: "tool_use", id: toolId, name: toolName
-                            )
-                            try await writer.write(ByteBuffer(string: blkStart))
+                            try await writer.write(ByteBuffer(string: AnthropicSSE.contentBlockStart(
+                                index: contentIndex, type: "tool_use", id: toolId, name: toolName)))
                             toolCalls[idx] = ToolCall(id: toolId, name: toolName, args: "", blockIdx: contentIndex)
                             contentIndex += 1
                         }
                         if let args = func_["arguments"] as? String, !args.isEmpty {
                             let blkIdx = toolCalls[idx]!.blockIdx
                             toolCalls[idx]!.args += args
-                            let jsonDelta = AnthropicSSE.inputJsonDelta(index: blkIdx, partial: args)
-                            try await writer.write(ByteBuffer(string: jsonDelta))
+                            try await writer.write(ByteBuffer(string: AnthropicSSE.inputJsonDelta(index: blkIdx, partial: args)))
                         }
                     }
                 }
             }
 
-            // Close open blocks
             if textBlockStarted {
-                let stopIdx = contentIndex
-                let blkStop = AnthropicSSE.contentBlockStop(index: stopIdx)
-                try await writer.write(ByteBuffer(string: blkStop))
+                try await writer.write(ByteBuffer(string: AnthropicSSE.contentBlockStop(index: contentIndex)))
             }
             for (_, tc) in toolCalls {
-                let blkStop = AnthropicSSE.contentBlockStop(index: tc.blockIdx)
-                try await writer.write(ByteBuffer(string: blkStop))
+                try await writer.write(ByteBuffer(string: AnthropicSSE.contentBlockStop(index: tc.blockIdx)))
             }
 
             let stopReason = toolCalls.isEmpty ? "end_turn" : "tool_use"
-            let msgDelta = AnthropicSSE.messageDelta(stopReason: stopReason)
-            try await writer.write(ByteBuffer(string: msgDelta))
-            let msgStop = AnthropicSSE.messageStop()
-            try await writer.write(ByteBuffer(string: msgStop))
+            try await writer.write(ByteBuffer(string: AnthropicSSE.messageDelta(stopReason: stopReason)))
+            try await writer.write(ByteBuffer(string: AnthropicSSE.messageStop()))
             try await writer.finish(nil)
+
+            // 統計記録
+            let elapsed = Date().timeIntervalSince(t0)
+            await RequestStats.shared.record(isExternal: isExternal, outputTokens: tokenCount, elapsed: elapsed)
         }
 
-        return Response(
-            status: .ok,
+        return Response(status: .ok,
             headers: [.contentType: "text/event-stream", .cacheControl: "no-cache"],
-            body: responseBody
-        )
+            body: responseBody)
     }
 
     // MARK: - Passthrough stream for OpenAI
-    private static func passthroughStream(req: URLRequest) async throws -> Response {
+    private static func passthroughStream(req: URLRequest, isExternal: Bool) async throws -> Response {
         let (asyncBytes, _) = try await URLSession.shared.bytes(for: req)
         let responseBody = ResponseBody { writer in
+            var tokenCount = 0
+            let t0 = Date()
             for try await line in asyncBytes.lines {
                 if !line.isEmpty {
+                    tokenCount += 1
                     try await writer.write(ByteBuffer(string: line + "\n"))
                 }
             }
             try await writer.finish(nil)
+            let elapsed = Date().timeIntervalSince(t0)
+            await RequestStats.shared.record(isExternal: isExternal, outputTokens: tokenCount, elapsed: elapsed)
         }
-        return Response(
-            status: .ok,
+        return Response(status: .ok,
             headers: [.contentType: "text/event-stream", .cacheControl: "no-cache"],
-            body: responseBody
-        )
+            body: responseBody)
     }
 
     // MARK: - Conversion helpers
@@ -314,61 +336,40 @@ struct ProxyHandler {
         for msg in messages {
             let role = msg["role"] as? String ?? "user"
             let content = msg["content"]
-
             if let s = content as? String {
-                oai.append(["role": role, "content": s])
-                continue
+                oai.append(["role": role, "content": s]); continue
             }
             guard let arr = content as? [[String: Any]] else { continue }
 
-            var textParts: [String] = []
-            var imageParts: [[String: Any]] = []
-            var toolCalls: [[String: Any]] = []
-            var toolResults: [[String: Any]] = []
+            var textParts: [String] = []; var imageParts: [[String: Any]] = []
+            var toolCalls: [[String: Any]] = []; var toolResults: [[String: Any]] = []
 
             for block in arr {
                 let t = block["type"] as? String ?? ""
                 switch t {
-                case "text":
-                    textParts.append(block["text"] as? String ?? "")
+                case "text": textParts.append(block["text"] as? String ?? "")
                 case "image":
                     if let src = block["source"] as? [String: Any] {
                         if src["type"] as? String == "base64",
-                           let mt = src["media_type"] as? String,
-                           let d = src["data"] as? String {
-                            imageParts.append([
-                                "type": "image_url",
-                                "image_url": ["url": "data:\(mt);base64,\(d)"]
-                            ])
+                           let mt = src["media_type"] as? String, let d = src["data"] as? String {
+                            imageParts.append(["type":"image_url","image_url":["url":"data:\(mt);base64,\(d)"]])
                         } else if src["type"] as? String == "url", let u = src["url"] as? String {
-                            imageParts.append([
-                                "type": "image_url",
-                                "image_url": ["url": u]
-                            ])
+                            imageParts.append(["type":"image_url","image_url":["url":u]])
                         }
                     }
                 case "tool_use":
                     let args: Any = block["input"] ?? [String: Any]()
-                    let argsStr: String
-                    if let d = try? JSONSerialization.data(withJSONObject: args) {
-                        argsStr = String(data: d, encoding: .utf8) ?? "{}"
-                    } else { argsStr = "{}" }
-                    toolCalls.append([
-                        "id": block["id"] as Any,
-                        "type": "function",
-                        "function": ["name": block["name"] as Any, "arguments": argsStr]
-                    ])
+                    let argsStr = (try? JSONSerialization.data(withJSONObject: args))
+                        .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                    toolCalls.append(["id":block["id"] as Any,"type":"function",
+                        "function":["name":block["name"] as Any,"arguments":argsStr]])
                 case "tool_result":
                     var trContent = ""
                     if let s = block["content"] as? String { trContent = s }
                     else if let arr2 = block["content"] as? [[String: Any]] {
                         trContent = arr2.compactMap { $0["text"] as? String }.joined(separator: "\n")
                     }
-                    toolResults.append([
-                        "role": "tool",
-                        "tool_call_id": block["tool_use_id"] as Any,
-                        "content": trContent
-                    ])
+                    toolResults.append(["role":"tool","tool_call_id":block["tool_use_id"] as Any,"content":trContent])
                 default: break
                 }
             }
@@ -380,9 +381,7 @@ struct ProxyHandler {
             } else if role == "user" {
                 if !imageParts.isEmpty {
                     var mc: [[String: Any]] = imageParts
-                    if !textParts.isEmpty {
-                        mc.append(["type": "text", "text": textParts.joined(separator: "\n")])
-                    }
+                    if !textParts.isEmpty { mc.append(["type":"text","text":textParts.joined(separator: "\n")]) }
                     oai.append(["role": "user", "content": mc])
                 } else if !textParts.isEmpty {
                     oai.append(["role": "user", "content": textParts.joined(separator: "\n")])
@@ -416,9 +415,7 @@ struct ProxyHandler {
         for tc in (message["tool_calls"] as? [[String: Any]]) ?? [] {
             let func_ = tc["function"] as? [String: Any] ?? [:]
             let argsStr = func_["arguments"] as? String ?? "{}"
-            let input = (try? JSONSerialization.jsonObject(
-                with: argsStr.data(using: .utf8) ?? Data()
-            )) ?? [String: Any]()
+            let input = (try? JSONSerialization.jsonObject(with: argsStr.data(using: .utf8) ?? Data())) ?? [String: Any]()
             contentBlocks.append([
                 "type": "tool_use",
                 "id": "toolu_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24))",
@@ -429,17 +426,13 @@ struct ProxyHandler {
         let stopReason = finish == "tool_calls" ? "tool_use" : "end_turn"
         return [
             "id": "msg_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24))",
-            "type": "message",
-            "role": "assistant",
-            "model": model,
+            "type": "message", "role": "assistant", "model": model,
             "content": contentBlocks.isEmpty ? [["type": "text", "text": ""]] : contentBlocks,
-            "stop_reason": stopReason,
-            "stop_sequence": NSNull(),
+            "stop_reason": stopReason, "stop_sequence": NSNull(),
             "usage": [
                 "input_tokens": usage["prompt_tokens"] ?? 0,
                 "output_tokens": usage["completion_tokens"] ?? 0,
-                "cache_creation_input_tokens": 0,
-                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
             ] as [String: Any]
         ]
     }
